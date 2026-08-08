@@ -4,8 +4,36 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from src.api.base import APIClient
 from src.api.ergast import ErgastClient
 from src.api.openf1 import OpenF1Client
+
+
+class TestAPIClientRateLimiting:
+    @patch("src.api.base.time")
+    def test_throttle_sleeps_between_rapid_requests(self, mock_time):
+        # monotonic returns the same instant for both throttle calls, so the
+        # second call sees ~0 elapsed and must sleep to honour the interval.
+        mock_time.monotonic.return_value = 1000.0
+        client = APIClient("https://example.com")
+
+        client._throttle()  # first call: primes last-request timestamp
+        client._throttle()  # second call: no time has passed -> must wait
+
+        mock_time.sleep.assert_called_once()
+        assert mock_time.sleep.call_args[0][0] == pytest.approx(client._min_interval)
+
+    def test_parse_retry_after_reads_seconds(self):
+        resp = MagicMock()
+        resp.headers = {"Retry-After": "7"}
+        assert APIClient._parse_retry_after(resp) == 7.0
+
+    def test_parse_retry_after_defaults_when_absent(self):
+        resp = MagicMock()
+        resp.headers = {}
+        assert APIClient._parse_retry_after(resp) == 2.0
 
 
 class TestErgastClient:
