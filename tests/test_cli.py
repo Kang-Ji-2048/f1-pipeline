@@ -35,6 +35,18 @@ class TestLiveCommand:
         assert kwargs["max_iterations"] == 1
 
 
+class TestIngestOpenF1Command:
+    def test_skip_existing_flag_passed_through(self):
+        runner = CliRunner()
+        with patch("src.pipeline.cli.ingest_telemetry") as mock_ingest:
+            mock_ingest.return_value = {"sessions": 0, "telemetry_samples": 0}
+            result = runner.invoke(main, ["ingest-openf1", "--year", "2024", "--skip-existing"])
+
+        assert result.exit_code == 0
+        _, kwargs = mock_ingest.call_args
+        assert kwargs["skip_existing"] is True
+
+
 class TestExportS3Command:
     def test_errors_when_no_bucket(self):
         runner = CliRunner()

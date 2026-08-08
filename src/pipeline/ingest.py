@@ -203,26 +203,48 @@ def ingest_season(season_year: int) -> dict[str, int]:
 # ── OpenF1 ingestion ─────────────────────────────────────────────────────────
 
 
-def ingest_telemetry(year: int, session_keys: Sequence[int] | None = None) -> dict[str, int]:
-    """Ingest OpenF1 session and telemetry data for a year."""
+def ingest_telemetry(
+    year: int,
+    session_keys: Sequence[int] | None = None,
+    skip_existing: bool = False,
+) -> dict[str, int]:
+    """Ingest OpenF1 session and telemetry data for a year.
+
+    Telemetry is fetched one driver at a time (an entire session's ``car_data`` is
+    far too large for a single request), and progress is committed after each
+    session so a failure part-way leaves the completed sessions persisted. Pass
+    ``skip_existing=True`` to resume: sessions that already have telemetry rows are
+    skipped instead of re-fetched.
+    """
     counts: dict[str, int] = {}
 
     with OpenF1Client() as openf1, get_session() as session:
         sessions = openf1.get_sessions(year)
         session_rows = [s.model_dump() for s in sessions]
         counts["sessions"] = _upsert_batch(session, SessionInfo, session_rows, ["session_key"])
+        session.commit()
 
-        keys = session_keys or [s.session_key for s in sessions]
+        keys = list(session_keys) if session_keys else [s.session_key for s in sessions]
+
+        if skip_existing:
+            done = {row[0] for row in session.query(TelemetrySample.session_key).distinct().all()}
+            keys = [k for k in keys if k not in done]
+
         telem_count = 0
         for sk in keys:
-            samples = openf1.get_car_data(sk)
-            telem_rows = [t.model_dump() for t in samples]
-            telem_count += _upsert_batch(
-                session,
-                TelemetrySample,
-                telem_rows,
-                ["session_key", "driver_number", "date"],
-            )
+            session_total = 0
+            for driver_number in openf1.get_session_drivers(sk):
+                samples = openf1.get_car_data(sk, driver_number=driver_number)
+                telem_rows = [t.model_dump() for t in samples]
+                session_total += _upsert_batch(
+                    session,
+                    TelemetrySample,
+                    telem_rows,
+                    ["session_key", "driver_number", "date"],
+                )
+            session.commit()
+            telem_count += session_total
+            logger.info("session_telemetry_ingested", session_key=sk, count=session_total)
         counts["telemetry_samples"] = telem_count
 
     logger.info("telemetry_ingested", year=year, counts=counts)

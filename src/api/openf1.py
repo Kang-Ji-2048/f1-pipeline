@@ -37,6 +37,19 @@ class OpenF1Client:
         logger.info("openf1_sessions", year=year, count=len(sessions))
         return sessions
 
+    def get_session_drivers(self, session_key: int) -> list[int]:
+        """Return the sorted, unique driver numbers present in a session.
+
+        Used to fetch telemetry one driver at a time, keeping each ``/car_data``
+        request (and the resulting memory footprint) bounded.
+        """
+        raw = self._client.get("/drivers", params={"session_key": session_key})
+        numbers = sorted(
+            {int(d["driver_number"]) for d in raw if d.get("driver_number") is not None}
+        )
+        logger.info("openf1_session_drivers", session_key=session_key, count=len(numbers))
+        return numbers
+
     def get_car_data(
         self,
         session_key: int,

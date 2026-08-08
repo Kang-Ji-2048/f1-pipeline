@@ -139,3 +139,19 @@ class TestOpenF1Client:
             "/car_data",
             params={"session_key": 9001, "date>": "2023-03-05T15:01:00"},
         )
+
+    @patch("src.api.openf1.APIClient")
+    def test_get_session_drivers_returns_sorted_unique_numbers(self, mock_api_cls):
+        mock_client = MagicMock()
+        mock_api_cls.return_value = mock_client
+        mock_client.get.return_value = [
+            {"driver_number": 44, "session_key": 9001},
+            {"driver_number": 1, "session_key": 9001},
+            {"driver_number": 44, "session_key": 9001},
+        ]
+
+        with OpenF1Client() as client:
+            drivers = client.get_session_drivers(9001)
+
+        mock_client.get.assert_called_once_with("/drivers", params={"session_key": 9001})
+        assert drivers == [1, 44]
