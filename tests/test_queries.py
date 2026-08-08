@@ -1,0 +1,96 @@
+"""Tests for dashboard-oriented query helpers on F1Database."""
+
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from src.db.queries import F1Database
+from src.db.schema import Base, LapTime, PitStop, Race
+
+
+@pytest.fixture()
+def seeded_session():
+    """In-memory SQLite session seeded with one race, two drivers, laps and pits."""
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+
+    session.add(
+        Race(
+            id=1,
+            season_year=2023,
+            round=1,
+            name="Test Grand Prix",
+            circuit_ref="testcircuit",
+            date=date(2023, 3, 5),
+        )
+    )
+    # SQLite does not autoincrement BigInteger PKs, so ids are assigned explicitly.
+    lap_id = 1
+    # ver: 5 laps, pits after lap 2 -> stints 1-2 and 3-5
+    for lap, t in enumerate(["1:32.500", "1:31.000", "1:33.200", "1:30.900", "1:31.400"], 1):
+        session.add(LapTime(id=lap_id, race_id=1, driver_ref="ver", lap=lap, time_str=t))
+        lap_id += 1
+    session.add(PitStop(id=1, race_id=1, driver_ref="ver", stop=1, lap=2))
+    # ham: 5 laps, no pit -> single stint 1-5; one lap already has time_millis
+    for lap in range(1, 6):
+        session.add(
+            LapTime(
+                id=lap_id,
+                race_id=1,
+                driver_ref="ham",
+                lap=lap,
+                time_str=None if lap == 1 else "1:32.000",
+                time_millis=91000 if lap == 1 else None,
+            )
+        )
+        lap_id += 1
+
+    session.commit()
+    yield session
+    session.close()
+
+
+class TestLapTimeDistribution:
+    def test_returns_millis_for_all_laps(self, seeded_session):
+        db = F1Database(session=seeded_session)
+        rows = db.get_lap_time_distribution(2023, 1)
+
+        # 10 laps total, all with a resolvable millis value
+        assert len(rows) == 10
+        assert all(r["time_millis"] is not None for r in rows)
+
+        ver_lap1 = next(r for r in rows if r["driver_ref"] == "ver" and r["lap"] == 1)
+        assert ver_lap1["time_millis"] == 92500  # "1:32.500" parsed
+
+        ham_lap1 = next(r for r in rows if r["driver_ref"] == "ham" and r["lap"] == 1)
+        assert ham_lap1["time_millis"] == 91000  # pre-existing time_millis kept
+
+    def test_empty_for_unknown_race(self, seeded_session):
+        db = F1Database(session=seeded_session)
+        assert db.get_lap_time_distribution(2023, 99) == []
+
+
+class TestStints:
+    def test_derives_stints_from_pit_stops(self, seeded_session):
+        db = F1Database(session=seeded_session)
+        stints = db.get_stints(2023, 1)
+
+        ver = [s for s in stints if s["driver_ref"] == "ver"]
+        assert ver == [
+            {"driver_ref": "ver", "stint": 1, "start_lap": 1, "end_lap": 2, "laps": 2},
+            {"driver_ref": "ver", "stint": 2, "start_lap": 3, "end_lap": 5, "laps": 3},
+        ]
+
+        ham = [s for s in stints if s["driver_ref"] == "ham"]
+        assert ham == [
+            {"driver_ref": "ham", "stint": 1, "start_lap": 1, "end_lap": 5, "laps": 5},
+        ]
+
+    def test_empty_for_unknown_race(self, seeded_session):
+        db = F1Database(session=seeded_session)
+        assert db.get_stints(2023, 99) == []
