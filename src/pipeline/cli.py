@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 
 import click
-import logging
-
 import structlog
 
 from src.config import settings
@@ -106,7 +105,9 @@ def drivers(season: int) -> None:
     """List drivers for a season."""
     with F1Database() as db:
         for d in db.get_drivers(season):
-            click.echo(f"{d['code'] or '---':>3}  {d['forename']} {d['surname']}  ({d['nationality']})")
+            click.echo(
+                f"{d['code'] or '---':>3}  {d['forename']} {d['surname']}  ({d['nationality']})"
+            )
 
 
 @query.command()
@@ -138,7 +139,10 @@ def standings(season: int) -> None:
     """Show driver championship standings for a season."""
     with F1Database() as db:
         for i, row in enumerate(db.get_driver_standings(season), 1):
-            click.echo(f"{i:>2}. {row['driver_ref']:<20} {row['total_points']:6.1f}pts  ({row['races']} races)")
+            click.echo(
+                f"{i:>2}. {row['driver_ref']:<20} {row['total_points']:6.1f}pts  "
+                f"({row['races']} races)"
+            )
 
 
 @query.command()
@@ -159,7 +163,10 @@ def laps(season: int, round_num: int, driver: str | None) -> None:
     with F1Database() as db:
         for lt in db.get_lap_times(season, round_num, driver):
             time_display = lt["time_str"] or "N/A"
-            click.echo(f"{lt['driver_ref']:<20} Lap {lt['lap']:>2}  P{lt['position'] or '?':>2}  {time_display}")
+            click.echo(
+                f"{lt['driver_ref']:<20} Lap {lt['lap']:>2}  "
+                f"P{lt['position'] or '?':>2}  {time_display}"
+            )
 
 
 @query.command()
@@ -171,7 +178,8 @@ def pits(season: int, round_num: int, driver: str | None) -> None:
     with F1Database() as db:
         for ps in db.get_pit_stops(season, round_num, driver):
             click.echo(
-                f"{ps['driver_ref']:<20} Stop {ps['stop']}  Lap {ps['lap']:>2}  {ps['time_of_day'] or ''}"
+                f"{ps['driver_ref']:<20} Stop {ps['stop']}  Lap {ps['lap']:>2}  "
+                f"{ps['time_of_day'] or ''}"
             )
 
 

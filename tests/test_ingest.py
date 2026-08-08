@@ -105,9 +105,7 @@ class TestIngestTelemetry:
         mock_openf1_cls.return_value.__enter__ = MagicMock(return_value=mock_openf1)
         mock_openf1_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        mock_openf1.get_sessions.return_value = [
-            SessionData(session_key=9001, year=2023)
-        ]
+        mock_openf1.get_sessions.return_value = [SessionData(session_key=9001, year=2023)]
         mock_openf1.get_car_data.return_value = []
 
         with patch("src.pipeline.ingest._upsert_batch", return_value=0):

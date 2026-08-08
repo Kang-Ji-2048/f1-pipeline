@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 
 from src.api.base import APIClient
@@ -34,9 +36,9 @@ class ErgastClient:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def _paginate(self, path: str, table_key: str, inner_key: str) -> list[dict]:
+    def _paginate(self, path: str, table_key: str, inner_key: str) -> list[dict[str, Any]]:
         """Fetch all pages from an Ergast endpoint."""
-        all_items: list[dict] = []
+        all_items: list[dict[str, Any]] = []
         limit = 100
         offset = 0
         while True:
@@ -72,9 +74,7 @@ class ErgastClient:
         return [RaceData.model_validate(r) for r in raw]
 
     def get_results(self, season: int, round_num: int) -> list[RaceResultData]:
-        raw = self._paginate(
-            f"/{season}/{round_num}/results", "RaceTable", "Races"
-        )
+        raw = self._paginate(f"/{season}/{round_num}/results", "RaceTable", "Races")
         if not raw:
             return []
         results_raw = raw[0].get("Results", [])
@@ -94,9 +94,7 @@ class ErgastClient:
         return parsed
 
     def get_lap_times(self, season: int, round_num: int) -> list[LapTimeData]:
-        raw = self._paginate(
-            f"/{season}/{round_num}/laps", "RaceTable", "Races"
-        )
+        raw = self._paginate(f"/{season}/{round_num}/laps", "RaceTable", "Races")
         if not raw:
             return []
         laps: list[LapTimeData] = []
@@ -109,9 +107,7 @@ class ErgastClient:
         return laps
 
     def get_pit_stops(self, season: int, round_num: int) -> list[PitStopData]:
-        raw = self._paginate(
-            f"/{season}/{round_num}/pitstops", "RaceTable", "Races"
-        )
+        raw = self._paginate(f"/{season}/{round_num}/pitstops", "RaceTable", "Races")
         if not raw:
             return []
         stops: list[PitStopData] = []
@@ -121,7 +117,7 @@ class ErgastClient:
         return stops
 
 
-def _flatten_circuits(raw: list[dict]) -> list[dict]:
+def _flatten_circuits(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Flatten nested Location dict into the circuit record."""
     flattened = []
     for c in raw:

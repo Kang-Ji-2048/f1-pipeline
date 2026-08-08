@@ -1,7 +1,7 @@
 """Normalised PostgreSQL schema for F1 data."""
 ####
 #### Additional Notes on DB Schema
-#### 
+####
 #### Driver Number can change over time, can be fixed by just using surname (check if this is completely valid i.e. all surnames unique)
 #### Circuits can change over time
 #### I'm also Ignoring sprint races because I think they're distinct enough from Grand Prix to not be used
@@ -9,7 +9,7 @@
 #### Also note that this isn't fully normalised to 3NF because I'm lazy :), need to deal with some foreign key stuff
 #### To Do,
 #### classify circuits by "bendiness"/number of straight chunks
-#### 
+####
 
 from __future__ import annotations
 
@@ -29,18 +29,18 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
-class Base(DeclarativeBase): # Can't delete this, used to create tables 
+class Base(DeclarativeBase): # Can't delete this, used to create tables
     pass
 
 
-#### Dimension tables 
+#### Dimension tables
 
 
 class Season(Base):
     __tablename__ = "seasons"
 
-    id = Column(Integer, primary_key=True, autoincrement=True) 
-    year = Column(Integer, unique=True, nullable=False) 
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    year = Column(Integer, unique=True, nullable=False)
     url = Column(Text)
 
     races = relationship("Race", back_populates="season")
@@ -49,8 +49,8 @@ class Season(Base):
 class Circuit(Base):
     __tablename__ = "circuits"
 
-    id = Column(Integer, primary_key=True, autoincrement=True) 
-    circuit_ref = Column(String(100), unique=True, nullable=False)  
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    circuit_ref = Column(String(100), unique=True, nullable=False)
     name = Column(String(255), nullable=False)
     location = Column(String(255))
     country = Column(String(100))
@@ -61,7 +61,7 @@ class Circuit(Base):
     races = relationship("Race", back_populates="circuit")
 
 
-class Constructor(Base): # Important one 
+class Constructor(Base): # Important one
     __tablename__ = "constructors"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -78,14 +78,14 @@ class Driver(Base): # Important one
     driver_ref = Column(String(100), unique=True, nullable=False)
     number = Column(Integer) # Note that this is non unique, driver numbers can change over time, e.g. MV 33 -> 1 -> 3
     code = Column(String(10))
-    forename = Column(String(100), nullable=False) # Excess info, can be removed 
-    surname = Column(String(100), nullable=False) # Excess info, can be removed 
+    forename = Column(String(100), nullable=False) # Excess info, can be removed
+    surname = Column(String(100), nullable=False) # Excess info, can be removed
     date_of_birth = Column(Date)
     nationality = Column(String(100))
     url = Column(Text)
 
 
-#### Fact tables 
+#### Fact tables
 
 
 class Race(Base):
@@ -174,7 +174,7 @@ class PitStop(Base):
     )
 
 
-#### OpenF1 telemetry tables 
+#### OpenF1 telemetry tables
 
 
 class TelemetrySample(Base):

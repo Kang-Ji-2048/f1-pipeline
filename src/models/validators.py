@@ -6,7 +6,6 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # ── Ergast API models ─────────────────────────────────────────────────────────
 
 

@@ -45,7 +45,6 @@ def _upsert_batch(
     if not rows:
         return 0
 
-    table = model.__table__
     mapper = sa_inspect(model)
     update_cols = [
         c.key for c in mapper.column_attrs if c.key not in conflict_columns and c.key != "id"
@@ -54,7 +53,7 @@ def _upsert_batch(
     total = 0
     for i in range(0, len(rows), settings.BATCH_SIZE):
         batch = rows[i : i + settings.BATCH_SIZE]
-        stmt = pg_insert(table).values(batch)
+        stmt = pg_insert(model).values(batch)
         if update_cols:
             stmt = stmt.on_conflict_do_update(
                 index_elements=conflict_columns,
@@ -112,15 +111,17 @@ def ingest_season(season_year: int) -> dict[str, int]:
         races = ergast.get_races(season_year)
         race_rows = []
         for r in races:
-            race_rows.append({
-                "season_year": r.season,
-                "round": r.round,
-                "name": r.race_name,
-                "circuit_ref": r.circuit.circuit_ref,
-                "date": r.date,
-                "time": r.time,
-                "url": r.url,
-            })
+            race_rows.append(
+                {
+                    "season_year": r.season,
+                    "round": r.round,
+                    "name": r.race_name,
+                    "circuit_ref": r.circuit.circuit_ref,
+                    "date": r.date,
+                    "time": r.time,
+                    "url": r.url,
+                }
+            )
         counts["races"] = _upsert_batch(session, Race, race_rows, ["season_year", "round"])
 
         # Build race ID lookup
@@ -140,21 +141,23 @@ def ingest_season(season_year: int) -> dict[str, int]:
             results = ergast.get_results(season_year, race.round)
             result_rows = []
             for res in results:
-                result_rows.append({
-                    "race_id": race_id,
-                    "driver_ref": res.driver.driver_ref,
-                    "constructor_ref": res.constructor.constructor_ref,
-                    "grid": res.grid,
-                    "position": res.position,
-                    "position_text": res.position_text,
-                    "points": res.points,
-                    "laps": res.laps,
-                    "status": res.status,
-                    "time_millis": res.time_millis,
-                    "fastest_lap_rank": res.fastest_lap_rank,
-                    "fastest_lap_time": res.fastest_lap_time,
-                    "fastest_lap_speed": res.fastest_lap_speed,
-                })
+                result_rows.append(
+                    {
+                        "race_id": race_id,
+                        "driver_ref": res.driver.driver_ref,
+                        "constructor_ref": res.constructor.constructor_ref,
+                        "grid": res.grid,
+                        "position": res.position,
+                        "position_text": res.position_text,
+                        "points": res.points,
+                        "laps": res.laps,
+                        "status": res.status,
+                        "time_millis": res.time_millis,
+                        "fastest_lap_rank": res.fastest_lap_rank,
+                        "fastest_lap_time": res.fastest_lap_time,
+                        "fastest_lap_speed": res.fastest_lap_speed,
+                    }
+                )
             result_count += _upsert_batch(
                 session, RaceResult, result_rows, ["race_id", "driver_ref"]
             )
@@ -171,9 +174,7 @@ def ingest_season(season_year: int) -> dict[str, int]:
                 }
                 for lt in laps
             ]
-            lap_count += _upsert_batch(
-                session, LapTime, lap_rows, ["race_id", "driver_ref", "lap"]
-            )
+            lap_count += _upsert_batch(session, LapTime, lap_rows, ["race_id", "driver_ref", "lap"])
 
             # Pit stops
             pit_stops = ergast.get_pit_stops(season_year, race.round)
@@ -285,7 +286,9 @@ def ingest_live(
 
 
 def _build_race_id_map(session: Session, season_year: int) -> dict[tuple[int, int], int]:
-    races = session.query(Race.id, Race.season_year, Race.round).filter(
-        Race.season_year == season_year
-    ).all()
+    races = (
+        session.query(Race.id, Race.season_year, Race.round)
+        .filter(Race.season_year == season_year)
+        .all()
+    )
     return {(r.season_year, r.round): r.id for r in races}

@@ -38,6 +38,19 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# These files carry long inline explanatory comments that must not be reformatted
+# (project CLAUDE.md forbids editing existing # comments), so E501 is waived here
+# rather than altering the comments.
+"src/config.py" = ["E501"]
+"src/db/schema.py" = ["E501"]
+
+[tool.ruff.format]
+# The formatter would normalise the hand-written # comments in these files
+# (e.g. "#ERGAST" -> "# ERGAST"); CLAUDE.md forbids editing those comments, so
+# they are excluded from formatting. They are still linted above.
+exclude = ["src/config.py", "src/db/schema.py"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers -v"
