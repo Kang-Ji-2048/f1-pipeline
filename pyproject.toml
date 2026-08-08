@@ -39,6 +39,12 @@ aws = [
 [project.scripts]
 f1-pipeline = "src.pipeline.cli:main"
 
+# The importable package is `src` (all modules are imported as `src.*`).
+# Without this, setuptools auto-discovery finds no packages and the install is
+# empty, breaking the console script and any `import src` outside the repo root.
+[tool.setuptools.packages.find]
+include = ["src*"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100
