@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.api.ergast import ErgastClient
 from src.api.openf1 import OpenF1Client
 
@@ -89,4 +87,33 @@ class TestOpenF1Client:
 
         mock_client.get.assert_called_once_with(
             "/car_data", params={"session_key": 9001}
+        )
+
+    @patch("src.api.openf1.APIClient")
+    def test_get_latest_car_data_defaults_to_latest(self, mock_api_cls, openf1_car_data_response):
+        mock_client = MagicMock()
+        mock_api_cls.return_value = mock_client
+        mock_client.get.return_value = openf1_car_data_response
+
+        with OpenF1Client() as client:
+            samples = client.get_latest_car_data()
+
+        mock_client.get.assert_called_once_with(
+            "/car_data", params={"session_key": "latest"}
+        )
+        assert len(samples) == 2
+        assert samples[0].speed == 315
+
+    @patch("src.api.openf1.APIClient")
+    def test_get_latest_car_data_with_after_cursor(self, mock_api_cls, openf1_car_data_response):
+        mock_client = MagicMock()
+        mock_api_cls.return_value = mock_client
+        mock_client.get.return_value = openf1_car_data_response
+
+        with OpenF1Client() as client:
+            client.get_latest_car_data(9001, after="2023-03-05T15:01:00")
+
+        mock_client.get.assert_called_once_with(
+            "/car_data",
+            params={"session_key": 9001, "date>": "2023-03-05T15:01:00"},
         )
