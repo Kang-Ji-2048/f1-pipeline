@@ -78,8 +78,9 @@ warn_return_any = true
 module = "src.dashboard.*"
 ignore_errors = true
 
-# boto3 is an optional extra ([aws]) and may not be installed in every
-# environment; it is imported lazily only when exporting to S3.
+# These are optional extras ([aws], [dashboard]) that may not be installed in
+# every environment (e.g. the CI type-check job). boto3 is imported lazily; the
+# dashboard module is excluded from type-checking above.
 [[tool.mypy.overrides]]
-module = ["boto3", "boto3.*"]
+module = ["boto3", "boto3.*", "streamlit", "streamlit.*", "plotly", "plotly.*", "pandas", "pandas.*"]
 ignore_missing_imports = true

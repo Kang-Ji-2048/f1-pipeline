@@ -17,11 +17,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install ruff mypy
+      # Install the package so mypy can resolve first-party and dependency imports.
+      - run: pip install -e ".[dev]"
       - name: Ruff lint
         run: ruff check src/ tests/
       - name: Ruff format check
         run: ruff format --check src/ tests/
+      - name: Type check (mypy --strict)
+        run: mypy --strict src/
 
   test:
     runs-on: ubuntu-latest
@@ -79,6 +82,9 @@ jobs:
           --health-retries=5
     env:
       DATABASE_URL: postgresql://f1user:f1pass@localhost:5432/f1data
+      # Surfaced from a secret so the S3 step can be conditionally skipped when
+      # AWS is not configured (secrets cannot be referenced directly in `if:`).
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -86,10 +92,17 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: pip install -e .
+        run: pip install -e ".[aws]"
       - name: Initialise database
         run: f1-pipeline init-db
       - name: Run Alembic migrations
         run: alembic upgrade head
       - name: Ingest current season
         run: f1-pipeline ingest-all --season 2025
+      - name: Export season to S3 (only when AWS is configured)
+        if: env.S3_BUCKET != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: f1-pipeline export-s3 --season 2025
