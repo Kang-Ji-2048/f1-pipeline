@@ -54,12 +54,18 @@ def ingest_ergast(season: int) -> None:
 @main.command()
 @click.option("--year", "-y", required=True, type=int, help="Year to ingest telemetry for")
 @click.option("--session-key", "-k", multiple=True, type=int, help="Specific session keys")
-def ingest_openf1(year: int, session_key: tuple[int, ...]) -> None:
+@click.option(
+    "--skip-existing",
+    "-x",
+    is_flag=True,
+    help="Skip sessions that already have telemetry (resume a partial run)",
+)
+def ingest_openf1(year: int, session_key: tuple[int, ...], skip_existing: bool) -> None:
     """Ingest OpenF1 telemetry data for a season."""
     logger.info("cli_ingest_openf1", year=year)
     try:
         keys = list(session_key) if session_key else None
-        counts = ingest_telemetry(year, keys)
+        counts = ingest_telemetry(year, keys, skip_existing=skip_existing)
         click.echo(f"OpenF1 data for {year} ingested successfully:")
         for table, n in counts.items():
             click.echo(f"  {table}: {n} rows")

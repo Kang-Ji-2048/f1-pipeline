@@ -96,7 +96,9 @@ class TestIngestSeason:
 class TestIngestTelemetry:
     @patch("src.pipeline.ingest.get_session")
     @patch("src.pipeline.ingest.OpenF1Client")
-    def test_ingest_telemetry_specific_keys(self, mock_openf1_cls, mock_get_session):
+    def test_ingest_telemetry_chunks_per_driver_and_commits_per_session(
+        self, mock_openf1_cls, mock_get_session
+    ):
         mock_session = MagicMock()
         mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
         mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -106,6 +108,7 @@ class TestIngestTelemetry:
         mock_openf1_cls.return_value.__exit__ = MagicMock(return_value=False)
 
         mock_openf1.get_sessions.return_value = [SessionData(session_key=9001, year=2023)]
+        mock_openf1.get_session_drivers.return_value = [1, 44]
         mock_openf1.get_car_data.return_value = []
 
         with patch("src.pipeline.ingest._upsert_batch", return_value=0):
@@ -113,7 +116,41 @@ class TestIngestTelemetry:
 
         assert "sessions" in counts
         assert "telemetry_samples" in counts
-        mock_openf1.get_car_data.assert_called_once_with(9001)
+        # telemetry is fetched one driver at a time (bounded request size)
+        mock_openf1.get_session_drivers.assert_called_once_with(9001)
+        assert mock_openf1.get_car_data.call_count == 2
+        mock_openf1.get_car_data.assert_any_call(9001, driver_number=1)
+        mock_openf1.get_car_data.assert_any_call(9001, driver_number=44)
+        # progress is committed per session, not once at the very end
+        assert mock_session.commit.call_count >= 1
+
+    @patch("src.pipeline.ingest.get_session")
+    @patch("src.pipeline.ingest.OpenF1Client")
+    def test_ingest_telemetry_skip_existing_skips_done_sessions(
+        self, mock_openf1_cls, mock_get_session
+    ):
+        mock_session = MagicMock()
+        mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+        # session 9001 already has telemetry rows in the DB
+        mock_session.query.return_value.distinct.return_value.all.return_value = [(9001,)]
+
+        mock_openf1 = MagicMock()
+        mock_openf1_cls.return_value.__enter__ = MagicMock(return_value=mock_openf1)
+        mock_openf1_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_openf1.get_sessions.return_value = [
+            SessionData(session_key=9001, year=2023),
+            SessionData(session_key=9002, year=2023),
+        ]
+        mock_openf1.get_session_drivers.return_value = [1]
+        mock_openf1.get_car_data.return_value = []
+
+        with patch("src.pipeline.ingest._upsert_batch", return_value=0):
+            ingest_telemetry(2023, skip_existing=True)
+
+        # only the not-yet-ingested session is processed
+        mock_openf1.get_session_drivers.assert_called_once_with(9002)
 
 
 class TestIngestLive:
