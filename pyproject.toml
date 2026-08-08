@@ -77,3 +77,9 @@ warn_return_any = true
 [[tool.mypy.overrides]]
 module = "src.dashboard.*"
 ignore_errors = true
+
+# boto3 is an optional extra ([aws]) and may not be installed in every
+# environment; it is imported lazily only when exporting to S3.
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*"]
+ignore_missing_imports = true

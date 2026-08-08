@@ -33,3 +33,34 @@ class TestLiveCommand:
         _, kwargs = mock_live.call_args
         assert kwargs["session_key"] == "latest"
         assert kwargs["max_iterations"] == 1
+
+
+class TestExportS3Command:
+    def test_errors_when_no_bucket(self):
+        runner = CliRunner()
+        with patch("src.pipeline.cli.settings") as mock_settings:
+            mock_settings.S3_BUCKET = ""
+            mock_settings.S3_PREFIX = "f1-pipeline"
+            result = runner.invoke(main, ["export-s3", "--season", "2024"])
+
+        assert result.exit_code == 1
+        assert "no S3 bucket" in result.output
+
+    def test_exports_with_explicit_bucket(self):
+        runner = CliRunner()
+        with (
+            patch("src.pipeline.cli.F1Database") as mock_db_cls,
+            patch("src.pipeline.export.export_to_s3") as mock_export,
+        ):
+            mock_db = mock_db_cls.return_value.__enter__.return_value
+            mock_db.get_driver_standings.return_value = []
+            mock_db.get_constructor_standings.return_value = []
+            mock_db.get_races.return_value = []
+            mock_export.return_value = ["f1/2024/races.csv"]
+
+            result = runner.invoke(main, ["export-s3", "--season", "2024", "--bucket", "my-bucket"])
+
+        assert result.exit_code == 0
+        assert "f1/2024/races.csv" in result.output
+        args, _ = mock_export.call_args
+        assert args[1] == "my-bucket"

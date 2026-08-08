@@ -127,6 +127,38 @@ def live(session_key: str, interval: float, max_iterations: int | None) -> None:
         sys.exit(1)
 
 
+@main.command("export-s3")
+@click.option("--season", "-s", required=True, type=int, help="Season year to export")
+@click.option("--bucket", default=None, help="S3 bucket (defaults to $S3_BUCKET)")
+@click.option("--prefix", default=None, help="S3 key prefix (defaults to $S3_PREFIX)")
+def export_s3(season: int, bucket: str | None, prefix: str | None) -> None:
+    """Export a season's aggregated data to S3 as CSV artifacts."""
+    from src.pipeline.export import export_to_s3
+
+    target_bucket = bucket or settings.S3_BUCKET
+    if not target_bucket:
+        click.echo("Error: no S3 bucket set (use --bucket or S3_BUCKET).", err=True)
+        sys.exit(1)
+    base_prefix = prefix or settings.S3_PREFIX
+
+    with F1Database() as db:
+        rows_by_table = {
+            "driver_standings": db.get_driver_standings(season),
+            "constructor_standings": db.get_constructor_standings(season),
+            "races": db.get_races(season),
+        }
+
+    try:
+        keys = export_to_s3(rows_by_table, target_bucket, f"{base_prefix}/{season}")
+        click.echo(f"Exported {len(keys)} objects to s3://{target_bucket}:")
+        for key in keys:
+            click.echo(f"  {key}")
+    except Exception as exc:
+        logger.error("export_s3_failed", season=season, error=str(exc))
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
 @main.group()
 def query() -> None:
     """Query ingested F1 data."""
