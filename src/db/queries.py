@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from src.db.engine import get_session
 from src.db.schema import (
-    Circuit,
     Constructor,
     Driver,
     LapTime,
@@ -117,10 +116,7 @@ class F1Database:
         """Return all races for a season, ordered by round."""
         session = self._get_session()
         races = (
-            session.query(Race)
-            .filter(Race.season_year == season_year)
-            .order_by(Race.round)
-            .all()
+            session.query(Race).filter(Race.season_year == season_year).order_by(Race.round).all()
         )
         return [
             {
@@ -135,9 +131,7 @@ class F1Database:
 
     # ── Race results ─────────────────────────────────────────────────────────
 
-    def get_race_results(
-        self, season_year: int, round_num: int
-    ) -> list[dict[str, Any]]:
+    def get_race_results(self, season_year: int, round_num: int) -> list[dict[str, Any]]:
         """Return finishing order for a specific race."""
         session = self._get_session()
         race = (

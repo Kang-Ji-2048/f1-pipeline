@@ -39,9 +39,7 @@ class TestErgastClient:
     def test_get_results_empty(self, mock_api_cls):
         mock_client = MagicMock()
         mock_api_cls.return_value = mock_client
-        mock_client.get.return_value = {
-            "MRData": {"RaceTable": {"Races": [], "total": "0"}}
-        }
+        mock_client.get.return_value = {"MRData": {"RaceTable": {"Races": [], "total": "0"}}}
 
         with ErgastClient() as client:
             results = client.get_results(2023, 1)
@@ -85,9 +83,7 @@ class TestOpenF1Client:
         with OpenF1Client() as client:
             client.get_car_data(9001)
 
-        mock_client.get.assert_called_once_with(
-            "/car_data", params={"session_key": 9001}
-        )
+        mock_client.get.assert_called_once_with("/car_data", params={"session_key": 9001})
 
     @patch("src.api.openf1.APIClient")
     def test_get_latest_car_data_defaults_to_latest(self, mock_api_cls, openf1_car_data_response):
@@ -98,9 +94,7 @@ class TestOpenF1Client:
         with OpenF1Client() as client:
             samples = client.get_latest_car_data()
 
-        mock_client.get.assert_called_once_with(
-            "/car_data", params={"session_key": "latest"}
-        )
+        mock_client.get.assert_called_once_with("/car_data", params={"session_key": "latest"})
         assert len(samples) == 2
         assert samples[0].speed == 315
 
