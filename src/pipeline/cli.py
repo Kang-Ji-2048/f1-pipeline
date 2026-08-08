@@ -12,7 +12,7 @@ from src.config import settings
 from src.db.engine import engine
 from src.db.queries import F1Database
 from src.db.schema import Base
-from src.pipeline.ingest import ingest_season, ingest_telemetry
+from src.pipeline.ingest import ingest_live, ingest_season, ingest_telemetry
 
 # Map string log level to Python logging int (e.g. "INFO" -> 20)
 _log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
@@ -82,6 +82,47 @@ def ingest_all(season: int) -> None:
             click.echo(f"  {table}: {n} rows")
     except Exception as exc:
         logger.error("ingest_failed", season=season, error=str(exc))
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
+@main.command()
+@click.option(
+    "--session-key",
+    "-k",
+    default="latest",
+    help="OpenF1 session key, or 'latest' to follow the running session",
+)
+@click.option(
+    "--interval",
+    "-i",
+    default=settings.LIVE_POLL_INTERVAL,
+    type=float,
+    help="Seconds between polls",
+)
+@click.option(
+    "--max-iterations",
+    "-n",
+    default=None,
+    type=int,
+    help="Stop after N polls (default: run until interrupted)",
+)
+def live(session_key: str, interval: float, max_iterations: int | None) -> None:
+    """Poll OpenF1 for live telemetry and ingest it in real time."""
+    logger.info("cli_live", session_key=session_key, interval=interval)
+    try:
+        counts = ingest_live(
+            session_key=session_key,
+            interval=interval,
+            max_iterations=max_iterations,
+        )
+        click.echo("Live ingest stopped:")
+        for table, n in counts.items():
+            click.echo(f"  {table}: {n}")
+    except KeyboardInterrupt:
+        click.echo("Live ingest interrupted by user.")
+    except Exception as exc:
+        logger.error("live_failed", session_key=session_key, error=str(exc))
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
