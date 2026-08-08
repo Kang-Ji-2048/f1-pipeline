@@ -93,12 +93,10 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -e ".[aws]"
-      - name: Initialise database
-        run: f1-pipeline init-db
       - name: Run Alembic migrations
         run: alembic upgrade head
       - name: Ingest current season
-        run: f1-pipeline ingest-all --season 2025
+        run: f1-pipeline ingest-ergast --season 2025
       - name: Export season to S3 (only when AWS is configured)
         if: env.S3_BUCKET != ''
         env:
