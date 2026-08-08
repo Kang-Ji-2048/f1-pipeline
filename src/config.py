@@ -18,6 +18,10 @@ class Settings:
     BATCH_SIZE: int = int(os.getenv("BATCH_SIZE", "500"))
     MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
     RETRY_BACKOFF: float = float(os.getenv("RETRY_BACKOFF", "2.0"))
+    RATE_LIMIT_DELAY: float = float(os.getenv("RATE_LIMIT_DELAY", "0.5"))
+    LIVE_POLL_INTERVAL: float = float(os.getenv("LIVE_POLL_INTERVAL", "5.0"))
+    S3_BUCKET: str = os.getenv("S3_BUCKET", "")
+    S3_PREFIX: str = os.getenv("S3_PREFIX", "f1-pipeline")
 
 
 settings = Settings()

@@ -124,7 +124,11 @@ class TestRaceResultData:
             "grid": "1",
             "laps": "57",
             "status": "Finished",
-            "Driver": {"driverId": "max_verstappen", "givenName": "Max", "familyName": "Verstappen"},
+            "Driver": {
+                "driverId": "max_verstappen",
+                "givenName": "Max",
+                "familyName": "Verstappen",
+            },
             "Constructor": {"constructorId": "red_bull", "name": "Red Bull"},
         }
         r = RaceResultData.model_validate(raw)

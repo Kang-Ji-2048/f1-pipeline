@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 
 from src.api.base import APIClient
@@ -50,6 +52,31 @@ class OpenF1Client:
             "openf1_telemetry",
             session_key=session_key,
             driver=driver_number,
+            count=len(samples),
+        )
+        return samples
+
+    def get_latest_car_data(
+        self,
+        session_key: int | str = "latest",
+        after: str | None = None,
+    ) -> list[TelemetryData]:
+        """Fetch car telemetry for live polling.
+
+        ``session_key`` accepts the literal ``"latest"`` to follow the currently
+        running session. When ``after`` (an ISO timestamp) is given, only samples
+        with ``date`` strictly greater than it are returned, so a poller can pull
+        just the newly-arrived rows each iteration.
+        """
+        params: dict[str, Any] = {"session_key": session_key}
+        if after is not None:
+            params["date>"] = after
+        raw = self._client.get("/car_data", params=params)
+        samples = [TelemetryData.model_validate(s) for s in raw]
+        logger.info(
+            "openf1_latest_telemetry",
+            session_key=session_key,
+            after=after,
             count=len(samples),
         )
         return samples

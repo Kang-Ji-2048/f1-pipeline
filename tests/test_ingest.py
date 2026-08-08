@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.models.validators import (
     CircuitData,
     ConstructorData,
     DriverData,
-    RaceData,
     SessionData,
     TelemetryData,
 )
-from src.pipeline.ingest import _upsert_batch, ingest_season, ingest_telemetry
+from src.pipeline.ingest import (
+    _upsert_batch,
+    ingest_live,
+    ingest_season,
+    ingest_telemetry,
+)
 
 
 class TestUpsertBatch:
@@ -80,7 +82,7 @@ class TestIngestSeason:
         # Mock the query chain for race ID lookup
         mock_session.query.return_value.filter.return_value.all.return_value = []
 
-        with patch("src.pipeline.ingest._upsert_batch", return_value=1) as mock_upsert:
+        with patch("src.pipeline.ingest._upsert_batch", return_value=1):
             counts = ingest_season(2023)
 
         assert "seasons" in counts
@@ -103,9 +105,7 @@ class TestIngestTelemetry:
         mock_openf1_cls.return_value.__enter__ = MagicMock(return_value=mock_openf1)
         mock_openf1_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        mock_openf1.get_sessions.return_value = [
-            SessionData(session_key=9001, year=2023)
-        ]
+        mock_openf1.get_sessions.return_value = [SessionData(session_key=9001, year=2023)]
         mock_openf1.get_car_data.return_value = []
 
         with patch("src.pipeline.ingest._upsert_batch", return_value=0):
@@ -114,3 +114,63 @@ class TestIngestTelemetry:
         assert "sessions" in counts
         assert "telemetry_samples" in counts
         mock_openf1.get_car_data.assert_called_once_with(9001)
+
+
+class TestIngestLive:
+    @patch("src.pipeline.ingest.get_session")
+    def test_ingest_live_polls_incrementally(self, mock_get_session):
+        mock_session = MagicMock()
+        mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+
+        batch1 = [
+            TelemetryData(session_key=9001, driver_number=1, date="2023-03-05T15:01:00"),
+            TelemetryData(session_key=9001, driver_number=1, date="2023-03-05T15:01:01"),
+        ]
+        batch2 = [
+            TelemetryData(session_key=9001, driver_number=1, date="2023-03-05T15:01:02"),
+        ]
+        fake_client = MagicMock()
+        fake_client.get_latest_car_data.side_effect = [batch1, batch2]
+
+        sleep_calls: list[float] = []
+
+        with patch("src.pipeline.ingest._upsert_batch", side_effect=[2, 1]):
+            counts = ingest_live(
+                session_key=9001,
+                interval=0.0,
+                max_iterations=2,
+                client=fake_client,
+                sleep=sleep_calls.append,
+            )
+
+        assert counts["telemetry_samples"] == 3
+        assert counts["iterations"] == 2
+
+        calls = fake_client.get_latest_car_data.call_args_list
+        assert calls[0].kwargs.get("after") is None
+        # second poll uses the max date from the first batch as its cursor
+        assert calls[1].kwargs["after"] == "2023-03-05T15:01:01"
+        # injected client is never closed by ingest_live
+        fake_client.close.assert_not_called()
+
+    @patch("src.pipeline.ingest.get_session")
+    def test_ingest_live_handles_empty_poll(self, mock_get_session):
+        mock_session = MagicMock()
+        mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+
+        fake_client = MagicMock()
+        fake_client.get_latest_car_data.return_value = []
+
+        with patch("src.pipeline.ingest._upsert_batch") as mock_upsert:
+            counts = ingest_live(
+                session_key="latest",
+                interval=0.0,
+                max_iterations=1,
+                client=fake_client,
+                sleep=lambda _s: None,
+            )
+
+        assert counts == {"telemetry_samples": 0, "iterations": 1}
+        mock_upsert.assert_not_called()

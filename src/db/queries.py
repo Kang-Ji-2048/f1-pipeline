@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from src.db.engine import get_session
 from src.db.schema import (
-    Circuit,
     Constructor,
     Driver,
     LapTime,
@@ -20,6 +19,26 @@ from src.db.schema import (
     SessionInfo,
     TelemetrySample,
 )
+
+
+def _parse_lap_time(time_str: str | None) -> int | None:
+    """Convert an Ergast lap-time string to milliseconds.
+
+    Accepts ``"M:SS.mmm"`` (e.g. ``"1:32.500"``) or plain seconds
+    ``"SS.mmm"``. Returns ``None`` when the value cannot be parsed.
+    """
+    if not time_str:
+        return None
+    try:
+        minutes = 0
+        rest = time_str
+        if ":" in time_str:
+            mins, rest = time_str.split(":", 1)
+            minutes = int(mins)
+        seconds = float(rest)
+        return int(round((minutes * 60 + seconds) * 1000))
+    except (ValueError, TypeError):
+        return None
 
 
 class F1Database:
@@ -117,10 +136,7 @@ class F1Database:
         """Return all races for a season, ordered by round."""
         session = self._get_session()
         races = (
-            session.query(Race)
-            .filter(Race.season_year == season_year)
-            .order_by(Race.round)
-            .all()
+            session.query(Race).filter(Race.season_year == season_year).order_by(Race.round).all()
         )
         return [
             {
@@ -135,9 +151,7 @@ class F1Database:
 
     # ── Race results ─────────────────────────────────────────────────────────
 
-    def get_race_results(
-        self, season_year: int, round_num: int
-    ) -> list[dict[str, Any]]:
+    def get_race_results(self, season_year: int, round_num: int) -> list[dict[str, Any]]:
         """Return finishing order for a specific race."""
         session = self._get_session()
         race = (
@@ -341,3 +355,87 @@ class F1Database:
             }
             for t in rows
         ]
+
+    # ── Dashboard aggregations ─────────────────────────────────────────────────
+
+    def get_lap_time_distribution(self, season_year: int, round_num: int) -> list[dict[str, Any]]:
+        """Return per-lap times in milliseconds for a race.
+
+        Uses stored ``time_millis`` where present, otherwise parses ``time_str``.
+        Laps with no resolvable time are omitted.
+        """
+        session = self._get_session()
+        race = (
+            session.query(Race)
+            .filter(Race.season_year == season_year, Race.round == round_num)
+            .first()
+        )
+        if race is None:
+            return []
+
+        laps = (
+            session.query(LapTime)
+            .filter(LapTime.race_id == race.id)
+            .order_by(LapTime.driver_ref, LapTime.lap)
+            .all()
+        )
+        rows: list[dict[str, Any]] = []
+        for lt in laps:
+            millis = lt.time_millis if lt.time_millis is not None else _parse_lap_time(lt.time_str)
+            if millis is None:
+                continue
+            rows.append({"driver_ref": lt.driver_ref, "lap": lt.lap, "time_millis": millis})
+        return rows
+
+    def get_stints(self, season_year: int, round_num: int) -> list[dict[str, Any]]:
+        """Return per-driver stints derived from pit-stop laps.
+
+        A stint runs from the lap after the previous pit stop (or lap 1) up to
+        and including the next pit-stop lap, with the final stint ending on the
+        driver's last completed lap.
+        """
+        session = self._get_session()
+        race = (
+            session.query(Race)
+            .filter(Race.season_year == season_year, Race.round == round_num)
+            .first()
+        )
+        if race is None:
+            return []
+
+        last_lap: dict[str, int] = {}
+        for driver_ref, max_lap in (
+            session.query(LapTime.driver_ref, func.max(LapTime.lap))
+            .filter(LapTime.race_id == race.id)
+            .group_by(LapTime.driver_ref)
+            .all()
+        ):
+            last_lap[str(driver_ref)] = int(max_lap)
+
+        pit_laps: dict[str, list[int]] = {}
+        for ps in (
+            session.query(PitStop)
+            .filter(PitStop.race_id == race.id)
+            .order_by(PitStop.driver_ref, PitStop.stop)
+            .all()
+        ):
+            pit_laps.setdefault(str(ps.driver_ref), []).append(int(ps.lap))
+
+        stints: list[dict[str, Any]] = []
+        for driver_ref in sorted(last_lap):
+            final_lap = last_lap[driver_ref]
+            boundaries = [lap for lap in sorted(pit_laps.get(driver_ref, [])) if lap < final_lap]
+            boundaries.append(final_lap)
+            start = 1
+            for stint_num, end in enumerate(boundaries, 1):
+                stints.append(
+                    {
+                        "driver_ref": driver_ref,
+                        "stint": stint_num,
+                        "start_lap": start,
+                        "end_lap": end,
+                        "laps": end - start + 1,
+                    }
+                )
+                start = end + 1
+        return stints

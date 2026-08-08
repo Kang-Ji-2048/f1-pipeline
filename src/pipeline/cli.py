@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 
 import click
-import logging
-
 import structlog
 
 from src.config import settings
 from src.db.engine import engine
 from src.db.queries import F1Database
 from src.db.schema import Base
-from src.pipeline.ingest import ingest_season, ingest_telemetry
+from src.pipeline.ingest import ingest_live, ingest_season, ingest_telemetry
 
 # Map string log level to Python logging int (e.g. "INFO" -> 20)
 _log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
@@ -87,6 +86,79 @@ def ingest_all(season: int) -> None:
         sys.exit(1)
 
 
+@main.command()
+@click.option(
+    "--session-key",
+    "-k",
+    default="latest",
+    help="OpenF1 session key, or 'latest' to follow the running session",
+)
+@click.option(
+    "--interval",
+    "-i",
+    default=settings.LIVE_POLL_INTERVAL,
+    type=float,
+    help="Seconds between polls",
+)
+@click.option(
+    "--max-iterations",
+    "-n",
+    default=None,
+    type=int,
+    help="Stop after N polls (default: run until interrupted)",
+)
+def live(session_key: str, interval: float, max_iterations: int | None) -> None:
+    """Poll OpenF1 for live telemetry and ingest it in real time."""
+    logger.info("cli_live", session_key=session_key, interval=interval)
+    try:
+        counts = ingest_live(
+            session_key=session_key,
+            interval=interval,
+            max_iterations=max_iterations,
+        )
+        click.echo("Live ingest stopped:")
+        for table, n in counts.items():
+            click.echo(f"  {table}: {n}")
+    except KeyboardInterrupt:
+        click.echo("Live ingest interrupted by user.")
+    except Exception as exc:
+        logger.error("live_failed", session_key=session_key, error=str(exc))
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
+@main.command("export-s3")
+@click.option("--season", "-s", required=True, type=int, help="Season year to export")
+@click.option("--bucket", default=None, help="S3 bucket (defaults to $S3_BUCKET)")
+@click.option("--prefix", default=None, help="S3 key prefix (defaults to $S3_PREFIX)")
+def export_s3(season: int, bucket: str | None, prefix: str | None) -> None:
+    """Export a season's aggregated data to S3 as CSV artifacts."""
+    from src.pipeline.export import export_to_s3
+
+    target_bucket = bucket or settings.S3_BUCKET
+    if not target_bucket:
+        click.echo("Error: no S3 bucket set (use --bucket or S3_BUCKET).", err=True)
+        sys.exit(1)
+    base_prefix = prefix or settings.S3_PREFIX
+
+    with F1Database() as db:
+        rows_by_table = {
+            "driver_standings": db.get_driver_standings(season),
+            "constructor_standings": db.get_constructor_standings(season),
+            "races": db.get_races(season),
+        }
+
+    try:
+        keys = export_to_s3(rows_by_table, target_bucket, f"{base_prefix}/{season}")
+        click.echo(f"Exported {len(keys)} objects to s3://{target_bucket}:")
+        for key in keys:
+            click.echo(f"  {key}")
+    except Exception as exc:
+        logger.error("export_s3_failed", season=season, error=str(exc))
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
 @main.group()
 def query() -> None:
     """Query ingested F1 data."""
@@ -106,7 +178,9 @@ def drivers(season: int) -> None:
     """List drivers for a season."""
     with F1Database() as db:
         for d in db.get_drivers(season):
-            click.echo(f"{d['code'] or '---':>3}  {d['forename']} {d['surname']}  ({d['nationality']})")
+            click.echo(
+                f"{d['code'] or '---':>3}  {d['forename']} {d['surname']}  ({d['nationality']})"
+            )
 
 
 @query.command()
@@ -138,7 +212,10 @@ def standings(season: int) -> None:
     """Show driver championship standings for a season."""
     with F1Database() as db:
         for i, row in enumerate(db.get_driver_standings(season), 1):
-            click.echo(f"{i:>2}. {row['driver_ref']:<20} {row['total_points']:6.1f}pts  ({row['races']} races)")
+            click.echo(
+                f"{i:>2}. {row['driver_ref']:<20} {row['total_points']:6.1f}pts  "
+                f"({row['races']} races)"
+            )
 
 
 @query.command()
@@ -159,7 +236,10 @@ def laps(season: int, round_num: int, driver: str | None) -> None:
     with F1Database() as db:
         for lt in db.get_lap_times(season, round_num, driver):
             time_display = lt["time_str"] or "N/A"
-            click.echo(f"{lt['driver_ref']:<20} Lap {lt['lap']:>2}  P{lt['position'] or '?':>2}  {time_display}")
+            click.echo(
+                f"{lt['driver_ref']:<20} Lap {lt['lap']:>2}  "
+                f"P{lt['position'] or '?':>2}  {time_display}"
+            )
 
 
 @query.command()
@@ -171,7 +251,8 @@ def pits(season: int, round_num: int, driver: str | None) -> None:
     with F1Database() as db:
         for ps in db.get_pit_stops(season, round_num, driver):
             click.echo(
-                f"{ps['driver_ref']:<20} Stop {ps['stop']}  Lap {ps['lap']:>2}  {ps['time_of_day'] or ''}"
+                f"{ps['driver_ref']:<20} Stop {ps['stop']}  Lap {ps['lap']:>2}  "
+                f"{ps['time_of_day'] or ''}"
             )
 
 
