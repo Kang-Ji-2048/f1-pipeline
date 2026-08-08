@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+import time
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import structlog
 from sqlalchemy import inspect as sa_inspect
@@ -223,6 +225,59 @@ def ingest_telemetry(year: int, session_keys: Sequence[int] | None = None) -> di
         counts["telemetry_samples"] = telem_count
 
     logger.info("telemetry_ingested", year=year, counts=counts)
+    return counts
+
+
+def ingest_live(
+    session_key: int | str = "latest",
+    interval: float = 5.0,
+    max_iterations: int | None = None,
+    client: OpenF1Client | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, int]:
+    """Poll OpenF1 for live telemetry and upsert new samples incrementally.
+
+    Each iteration fetches only samples newer than the highest ``date`` seen so
+    far (a moving cursor), so repeated polls never re-ingest the same rows. Runs
+    until ``max_iterations`` is reached, or forever when it is ``None``.
+
+    ``client`` and ``sleep`` are injectable for testing; an internally-created
+    client is closed on exit, an injected one is left to the caller.
+    """
+    counts: dict[str, int] = {"telemetry_samples": 0, "iterations": 0}
+    own_client = client is None
+    openf1 = client or OpenF1Client()
+    after: str | None = None
+
+    try:
+        with get_session() as session:
+            iteration = 0
+            while max_iterations is None or iteration < max_iterations:
+                samples = openf1.get_latest_car_data(session_key, after=after)
+                if samples:
+                    rows = [s.model_dump() for s in samples]
+                    counts["telemetry_samples"] += _upsert_batch(
+                        session,
+                        TelemetrySample,
+                        rows,
+                        ["session_key", "driver_number", "date"],
+                    )
+                    after = max(s.date for s in samples).isoformat()
+                counts["iterations"] += 1
+                iteration += 1
+                logger.info(
+                    "live_poll",
+                    session_key=session_key,
+                    new_samples=len(samples),
+                    cursor=after,
+                )
+                if max_iterations is None or iteration < max_iterations:
+                    sleep(interval)
+    finally:
+        if own_client:
+            openf1.close()
+
+    logger.info("live_ingest_stopped", session_key=session_key, counts=counts)
     return counts
 
 
