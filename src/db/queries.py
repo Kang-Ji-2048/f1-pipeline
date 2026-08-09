@@ -325,6 +325,18 @@ class F1Database:
             for s in rows
         ]
 
+    def get_telemetry_drivers(self, session_key: int) -> list[int]:
+        """Return the sorted, unique driver numbers with telemetry in a session."""
+        session = self._get_session()
+        rows = (
+            session.query(TelemetrySample.driver_number)
+            .filter(TelemetrySample.session_key == session_key)
+            .distinct()
+            .order_by(TelemetrySample.driver_number)
+            .all()
+        )
+        return [int(r[0]) for r in rows]
+
     def get_telemetry(
         self,
         session_key: int,
