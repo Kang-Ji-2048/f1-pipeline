@@ -202,7 +202,7 @@ def render_driver_performance(
         )
         fig.update_layout(xaxis_title="Points", yaxis_title=None)
         style_fig(fig, height=max(320, 24 * len(df)), show_legend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # ── Points progression: highlight the top 6, fade the rest ────────────────
     with right:
@@ -248,7 +248,7 @@ def render_driver_performance(
                     )
             fig.update_layout(xaxis_title="Round", yaxis_title="Cumulative points")
             style_fig(fig, height=max(320, 24 * len(df)))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
 
 def render_constructors(season: int, constructors: list[dict[str, Any]]) -> None:
@@ -274,7 +274,7 @@ def render_constructors(season: int, constructors: list[dict[str, Any]]) -> None
         )
         fig.update_layout(xaxis_title="Points", yaxis_title=None)
         style_fig(fig, height=max(320, 30 * len(df)), show_legend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with right:
         st.markdown("**Points progression by round**")
@@ -312,7 +312,7 @@ def render_constructors(season: int, constructors: list[dict[str, Any]]) -> None
                 )
         fig.update_layout(xaxis_title="Round", yaxis_title="Cumulative points")
         style_fig(fig, height=max(320, 30 * len(constructors)))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 
 def render_circuits() -> None:
@@ -346,7 +346,7 @@ def render_circuits() -> None:
     fig.update_layout(xaxis_title="Wins", yaxis_title=None)
     style_fig(fig, height=max(280, 30 * len(df)), show_legend=False)
     st.caption("Race winners at this circuit across all ingested seasons.")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_lap_time_distributions(season: int, round_num: int) -> None:
@@ -385,7 +385,7 @@ def render_lap_time_distributions(season: int, round_num: int) -> None:
                 }
                 for m in metrics
             ]
-            st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(table), hide_index=True, width="stretch")
 
     df = pd.DataFrame(rows)
     df["seconds"] = df["time_millis"] / 1000.0
@@ -403,7 +403,7 @@ def render_lap_time_distributions(season: int, round_num: int) -> None:
     fig.update_layout(xaxis_title="Lap time (s)", yaxis_title=None)
     style_fig(fig, height=max(340, 26 * len(order)), show_legend=False)
     st.caption("Sorted slowest→fastest by median lap. Tighter boxes = more consistent pace.")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_race_strategy(season: int, round_num: int) -> None:
@@ -427,7 +427,7 @@ def render_race_strategy(season: int, round_num: int) -> None:
     fig.update_layout(barmode="stack", xaxis_title="Laps", yaxis_title=None)
     style_fig(fig, height=max(340, 26 * df["driver_ref"].nunique()))
     st.caption("Each segment is a stint between pit stops; total bar length is race distance.")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     pits = load_pit_stops(season, round_num)
     if pits:
@@ -436,7 +436,7 @@ def render_race_strategy(season: int, round_num: int) -> None:
             st.dataframe(
                 pit_df,
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 column_config={
                     "driver_ref": "Driver",
                     "stop": "Stop #",
@@ -497,7 +497,7 @@ def render_head_to_head(
         )
         fig.update_layout(xaxis_title="Round", yaxis_title="Cumulative points")
         style_fig(fig, height=320)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # ── Finishing position by round (P1 at top) ──────────────────────────────
     pos: list[dict[str, Any]] = [
@@ -518,7 +518,7 @@ def render_head_to_head(
         fig.update_layout(xaxis_title="Round", yaxis_title="Finishing position")
         fig.update_yaxes(autorange="reversed")
         style_fig(fig, height=320)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # ── Lap-time distribution for the selected race ──────────────────────────
     if selected_round is not None:
@@ -538,7 +538,7 @@ def render_head_to_head(
             fig.update_layout(xaxis_title=None, yaxis_title="Lap time (s)")
             style_fig(fig, height=320, show_legend=False)
             st.caption("Lap-time distribution for the race selected in the sidebar.")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
 
 def render_championship_whatif(season: int, standings: list[dict[str, Any]]) -> None:
@@ -586,7 +586,7 @@ def render_championship_whatif(season: int, standings: list[dict[str, Any]]) -> 
         annotation_position="top",
     )
     style_fig(fig, height=max(340, 26 * len(scenarios)))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     st.caption("Bars reaching the dashed line can still catch a stalled leader.")
 
 
@@ -626,7 +626,7 @@ def render_telemetry(season: int) -> None:
     speed.update_traces(line=dict(color=ACCENT, width=2))
     speed.update_layout(xaxis_title="Elapsed (s)", yaxis_title="Speed (km/h)")
     style_fig(speed, height=260, show_legend=False)
-    st.plotly_chart(speed, use_container_width=True)
+    st.plotly_chart(speed, width="stretch")
 
     pedals = px.line(
         df,
@@ -636,13 +636,13 @@ def render_telemetry(season: int) -> None:
     )
     pedals.update_layout(xaxis_title="Elapsed (s)", yaxis_title="%")
     style_fig(pedals, height=240)
-    st.plotly_chart(pedals, use_container_width=True)
+    st.plotly_chart(pedals, width="stretch")
 
     gear = px.line(df, x="elapsed", y="gear", line_shape="hv")
     gear.update_traces(line=dict(color=PALETTE[6], width=2))
     gear.update_layout(xaxis_title="Elapsed (s)", yaxis_title="Gear")
     style_fig(gear, height=220, show_legend=False)
-    st.plotly_chart(gear, use_container_width=True)
+    st.plotly_chart(gear, width="stretch")
 
 
 def render_predictions(season: int, selected_round: int | None) -> None:
