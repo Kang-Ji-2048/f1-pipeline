@@ -86,7 +86,38 @@ For live sessions, run the real-time poller:
 docker compose run --rm pipeline live --session-key latest --interval 5
 ```
 
-## 6. Teardown
+## 6. Stable address & HTTPS (optional)
+
+By default the dashboard is at `http://<public-ip>:8501`, and the public IP
+changes whenever the instance is stopped/started. To make it stable and secure:
+
+**Stable IP — allocate an Elastic IP:**
+1. EC2 → **Elastic IPs** → **Allocate Elastic IP address** → Allocate.
+2. Select it → **Actions → Associate** → choose your instance → Associate.
+
+The instance now keeps that IP across stop/start. (Note: an Elastic IP that is
+*not* associated with a running instance incurs a small hourly charge.)
+
+**HTTPS — front the dashboard with a reverse proxy.** Streamlit does not
+terminate TLS itself. The simplest route is a small reverse proxy (e.g. Caddy or
+nginx) on the instance that proxies `:443` → `:8501` and obtains a certificate.
+This needs a **domain name** pointed at the Elastic IP; with a domain, Caddy can
+auto-provision a Let's Encrypt certificate:
+
+```bash
+# on the instance, with a domain (dash.example.com) pointed at the Elastic IP
+sudo apt-get install -y caddy
+echo "dash.example.com {
+    reverse_proxy localhost:8501
+}" | sudo tee /etc/caddy/Caddyfile
+sudo systemctl restart caddy
+# then open the 443 inbound rule in the security group and browse https://dash.example.com
+```
+
+Without a domain, keep the `http://<ip>:8501` setup and restrict the 8501
+security-group rule to your own IP.
+
+## 7. Teardown
 
 ```bash
 docker compose down -v   # stop stack and remove the Postgres volume
