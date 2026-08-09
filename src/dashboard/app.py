@@ -18,6 +18,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.analysis.pace import pace_metrics
 from src.analysis.projections import championship_scenarios
 from src.dashboard.theme import ACCENT, FADED, MUTED, PALETTE, style_fig
 from src.db.queries import F1Database
@@ -104,12 +105,50 @@ def render_driver_performance(
             st.plotly_chart(fig, use_container_width=True)
 
 
+def _fmt_laptime(millis: int) -> str:
+    """Format milliseconds as a lap time, e.g. 90500 -> '1:30.500'."""
+    total = millis / 1000.0
+    minutes = int(total // 60)
+    return f"{minutes}:{total - minutes * 60:06.3f}"
+
+
 def render_lap_time_distributions(db: F1Database, season: int, round_num: int) -> None:
-    """Box plot of lap-time distribution per driver for the selected race."""
+    """Pace summary cards plus a lap-time distribution box per driver."""
     rows = db.get_lap_time_distribution(season, round_num)
     if not rows:
         st.info("No lap-time data ingested for this race yet.")
         return
+
+    # ── Pace insight cards + ranking ─────────────────────────────────────────
+    metrics = pace_metrics(rows)
+    if metrics:
+        fastest = metrics[0]
+        steadiest = min(metrics, key=lambda m: m["std_millis"])
+        c1, c2 = st.columns(2)
+        c1.metric(
+            "Fastest lap",
+            _fmt_laptime(fastest["best_millis"]),
+            delta=str(fastest["driver_ref"]),
+            delta_color="off",
+        )
+        c2.metric(
+            "Most consistent",
+            str(steadiest["driver_ref"]),
+            delta=f"σ ±{steadiest['std_millis'] / 1000:.2f}s",
+            delta_color="off",
+        )
+        with st.expander("Pace ranking"):
+            table = [
+                {
+                    "Driver": m["driver_ref"],
+                    "Best lap": _fmt_laptime(m["best_millis"]),
+                    "Gap": "—" if m["delta_millis"] == 0 else f"+{m['delta_millis'] / 1000:.3f}s",
+                    "Consistency (σ)": f"{m['std_millis'] / 1000:.3f}s",
+                    "Laps": m["laps"],
+                }
+                for m in metrics
+            ]
+            st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True)
 
     df = pd.DataFrame(rows)
     df["seconds"] = df["time_millis"] / 1000.0
