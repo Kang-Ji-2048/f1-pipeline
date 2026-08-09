@@ -71,7 +71,28 @@ docker compose run --rm \
 
 Objects land at `s3://<bucket>/<prefix>/2025/<table>.csv`.
 
-## 5. Keeping data fresh
+## 5. Updating a running instance
+
+To deploy the latest code after merging changes, SSH in and run the update
+script from the repo root:
+
+```bash
+cd /opt/f1-pipeline
+sudo bash deploy/update.sh              # pulls latest, rebuilds, force-recreates
+```
+
+It fetches the current branch (override with `BRANCH=<name>`), rebuilds the
+images and **force-recreates** the containers (a plain `--build` keeps the old
+container running, so the dashboard would otherwise still show the stale
+version). Pass `--migrate` to also apply Alembic migrations — but only on an
+Alembic-managed database (instances first brought up with `init-db` are not
+stamped; see the note in [`update.sh`](update.sh)). Your Postgres volume, and so
+the ingested data, is left untouched.
+
+After it finishes, hard-refresh the dashboard (or use **⋮ → Clear cache**) since
+Streamlit caches aggressively.
+
+## 6. Keeping data fresh
 
 Schedule ingestion with cron on the instance:
 
@@ -86,7 +107,7 @@ For live sessions, run the real-time poller:
 docker compose run --rm pipeline live --session-key latest --interval 5
 ```
 
-## 6. Stable address & HTTPS (optional)
+## 7. Stable address & HTTPS (optional)
 
 By default the dashboard is at `http://<public-ip>:8501`, and the public IP
 changes whenever the instance is stopped/started. To make it stable and secure:
@@ -117,7 +138,7 @@ sudo systemctl restart caddy
 Without a domain, keep the `http://<ip>:8501` setup and restrict the 8501
 security-group rule to your own IP.
 
-## 7. Teardown
+## 8. Teardown
 
 ```bash
 docker compose down -v   # stop stack and remove the Postgres volume
