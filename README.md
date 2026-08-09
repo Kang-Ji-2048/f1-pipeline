@@ -94,14 +94,18 @@ pip install -e ".[dashboard]"
 streamlit run src/dashboard/app.py
 ```
 
-Six views, all reading from the same `DATABASE_URL`:
+Nine views, all reading from the same `DATABASE_URL`:
 
 - **Driver performance** — standings and points progression.
+- **Constructors** — team standings and points contribution.
 - **Lap-time distributions** — per-driver box plots plus fastest-lap / consistency pace cards.
 - **Race strategy** — stint lengths and pit stops.
+- **Circuits** — per-circuit history and past winners.
 - **Telemetry** — speed / throttle-brake / gear traces per driver from OpenF1.
 - **Head-to-head** — compare two drivers across the season.
 - **What-if** — championship projection: who can still mathematically win.
+- **Predictions** — the ML points model's hold-out quality metrics, feature
+  importances, and predicted-vs-actual points per race (needs the `ml` extra).
 
 Read queries are cached (`st.cache_data`) so switching views doesn't re-hit the
 database each time.

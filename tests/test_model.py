@@ -46,6 +46,17 @@ class TestModel:
         preds = ranked["predicted_points"].tolist()
         assert preds == sorted(preds, reverse=True)
 
+    def test_predict_keeps_driver_and_actual_points_for_comparison(self):
+        # The dashboard's Predictions tab charts predicted vs actual per driver,
+        # so predict() must return driver_ref and the actual points alongside
+        # the prediction.
+        features = build_features(_synthetic_rows())
+        ranked = predict(train_model(features), features)
+
+        for col in ("driver_ref", "points", "predicted_points"):
+            assert col in ranked.columns
+        assert ranked["driver_ref"].notna().all()
+
     def test_evaluate_returns_metrics_and_beats_or_matches_baseline(self):
         features = build_features(_synthetic_rows(n_rounds=16))
         result = evaluate(features, test_fraction=0.25)

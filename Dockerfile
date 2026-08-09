@@ -9,7 +9,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 
 RUN pip install --upgrade pip \
-    && pip install --prefix=/install ".[dashboard,aws]"
+    && pip install --prefix=/install ".[dashboard,aws,ml]"
 
 # ── Runtime stage: slim image with just the installed deps and the source ──
 FROM python:3.11-slim

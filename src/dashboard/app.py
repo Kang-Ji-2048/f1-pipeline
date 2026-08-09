@@ -121,6 +121,25 @@ def load_telemetry(session_key: int, driver_number: int) -> list[dict[str, Any]]
         return db.get_telemetry(session_key, driver_number, limit=5000)
 
 
+@st.cache_resource(ttl=_CACHE_TTL)
+def load_points_model() -> tuple[Any, Any, pd.DataFrame]:
+    """Train the race-points model on all ingested results (cached process-wide).
+
+    Returns ``(model, eval_result, feature_frame)``; ``model`` and ``eval_result``
+    are ``None`` when there are too few rows to train. The ML libraries are
+    imported lazily so the rest of the dashboard runs without the ``ml`` extra.
+    """
+    from src.ml.features import build_features
+    from src.ml.model import evaluate, train_model
+
+    with F1Database() as db:
+        rows = db.get_results_frame()
+    features = build_features(rows)
+    if len(features) < 10:
+        return None, None, features
+    return train_model(features), evaluate(features), features
+
+
 # ── Small helpers ────────────────────────────────────────────────────────────
 
 
@@ -626,6 +645,107 @@ def render_telemetry(season: int) -> None:
     st.plotly_chart(gear, use_container_width=True)
 
 
+def render_predictions(season: int, selected_round: int | None) -> None:
+    """Race-points predictions from the ML model, with hold-out quality metrics."""
+    try:
+        model, result, features = load_points_model()
+    except ModuleNotFoundError:
+        st.info(
+            "The prediction model needs the ML extra "
+            "(`pip install '.[ml]'` — already bundled in the Docker image)."
+        )
+        return
+
+    if model is None or features.empty:
+        st.info("Not enough ingested results yet to train the model (need ≥ 10 rows).")
+        return
+
+    from src.ml.model import predict  # safe: the model loaded, so ML is installed
+
+    st.caption(
+        "Gradient-boosting model predicting race points from leakage-safe, "
+        "pre-race features (grid, recent form, season & constructor form, circuit "
+        "history). Trained on all ingested results and evaluated on a time-ordered "
+        "hold-out against a linear baseline."
+    )
+
+    # ── Model-quality cards ───────────────────────────────────────────────────
+    lift = result.baseline_mae - result.mae  # >0 means the model beats the baseline
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("MAE", f"{result.mae:.2f} pts", f"{lift:+.2f} vs baseline")
+    m2.metric("Baseline MAE", f"{result.baseline_mae:.2f} pts")
+    m3.metric("R²", f"{result.r2:.3f}" if pd.notna(result.r2) else "—")
+    m4.metric("Train / test", f"{result.n_train} / {result.n_test}")
+
+    left, right = st.columns([1, 1], gap="large")
+
+    # ── Feature importances: single-hue horizontal bar, sorted ────────────────
+    with left:
+        st.markdown("**What drives the prediction**")
+        imp = pd.DataFrame(
+            {
+                "feature": list(result.feature_importances),
+                "importance": list(result.feature_importances.values()),
+            }
+        ).sort_values("importance")
+        fig = px.bar(imp, x="importance", y="feature", orientation="h", text="importance")
+        fig.update_traces(
+            marker_color=ACCENT,
+            texttemplate="%{text:.0%}",
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate="%{y}: %{x:.1%}<extra></extra>",
+        )
+        fig.update_layout(xaxis_title="Importance", yaxis_title=None, xaxis_tickformat=".0%")
+        style_fig(fig, height=320, show_legend=False)
+        st.plotly_chart(fig, width="stretch")
+
+    # ── Predicted vs actual points for the selected race ──────────────────────
+    with right:
+        if selected_round is None:
+            st.info("Select a race in the sidebar to see per-driver predictions.")
+            return
+        race = features[(features["season"] == season) & (features["round"] == selected_round)]
+        if race.empty:
+            st.info("No ingested data for the selected race.")
+            return
+
+        ranked = predict(model, race)
+        st.markdown(f"**Predicted vs actual points — round {selected_round}**")
+        order = ranked.sort_values("predicted_points")["driver_ref"].tolist()
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                y=ranked["driver_ref"],
+                x=ranked["predicted_points"],
+                orientation="h",
+                name="Predicted",
+                marker_color=PALETTE[0],
+                hovertemplate="%{y}: %{x:.1f} predicted<extra></extra>",
+            )
+        )
+        fig.add_trace(
+            go.Bar(
+                y=ranked["driver_ref"],
+                x=ranked["points"],
+                orientation="h",
+                name="Actual",
+                marker_color=PALETTE[1],
+                hovertemplate="%{y}: %{x:.1f} actual<extra></extra>",
+            )
+        )
+        fig.update_layout(
+            barmode="group",
+            bargap=0.25,
+            bargroupgap=0.08,
+            xaxis_title="Points",
+            yaxis_title=None,
+            yaxis=dict(categoryorder="array", categoryarray=order),
+        )
+        style_fig(fig, height=max(340, 30 * len(ranked)))
+        st.plotly_chart(fig, width="stretch")
+
+
 def main() -> None:
     st.set_page_config(page_title="F1 Data Dashboard", page_icon="🏎️", layout="wide")
     st.markdown(
@@ -666,7 +786,7 @@ def main() -> None:
         label = st.sidebar.selectbox("Race", list(race_labels))
         selected_round = race_labels[label]
 
-    tab1, tab7, tab2, tab3, tab8, tab4, tab5, tab6 = st.tabs(
+    tab1, tab7, tab2, tab3, tab8, tab4, tab5, tab6, tab9 = st.tabs(
         [
             "🏆 Driver performance",
             "🏭 Constructors",
@@ -676,6 +796,7 @@ def main() -> None:
             "📈 Telemetry",
             "🆚 Head-to-head",
             "🔮 What-if",
+            "🤖 Predictions",
         ]
     )
     with tab1:
@@ -700,6 +821,8 @@ def main() -> None:
         render_head_to_head(season, standings, selected_round)
     with tab6:
         render_championship_whatif(season, standings)
+    with tab9:
+        render_predictions(season, selected_round)
 
 
 if __name__ == "__main__":
