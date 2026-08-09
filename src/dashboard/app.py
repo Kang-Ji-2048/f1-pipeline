@@ -62,6 +62,18 @@ def load_races(season: int) -> list[dict[str, Any]]:
 
 
 @st.cache_data(ttl=_CACHE_TTL)
+def load_circuits() -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_circuits()
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_circuit_winners(circuit_ref: str) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_circuit_winners(circuit_ref)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
 def load_race_results(season: int, round_num: int) -> list[dict[str, Any]]:
     with F1Database() as db:
         return db.get_race_results(season, round_num)
@@ -282,6 +294,40 @@ def render_constructors(season: int, constructors: list[dict[str, Any]]) -> None
         fig.update_layout(xaxis_title="Round", yaxis_title="Cumulative points")
         style_fig(fig, height=max(320, 30 * len(constructors)))
         st.plotly_chart(fig, use_container_width=True)
+
+
+def render_circuits() -> None:
+    """Per-circuit history: races held and most successful drivers (win counts)."""
+    circuits = load_circuits()
+    if not circuits:
+        st.info("No circuits ingested yet.")
+        return
+
+    labels = {c["name"]: c["circuit_ref"] for c in circuits}
+    circuit_ref = labels[st.selectbox("Circuit", list(labels))]
+    winners = load_circuit_winners(circuit_ref)
+    if not winners:
+        st.info("No completed races recorded at this circuit yet.")
+        return
+
+    races_held = sum(w["wins"] for w in winners)
+    c1, c2 = st.columns(2)
+    c1.metric("Races held", races_held)
+    c2.metric("Most wins", f"{winners[0]['driver_ref']} ({winners[0]['wins']})")
+
+    df = pd.DataFrame(winners).sort_values("wins")
+    fig = px.bar(df, x="wins", y="driver_ref", orientation="h", text="wins")
+    fig.update_traces(
+        marker_color=ACCENT,
+        texttemplate="%{text}",
+        textposition="outside",
+        cliponaxis=False,
+        hovertemplate="%{y}: %{x} win(s)<extra></extra>",
+    )
+    fig.update_layout(xaxis_title="Wins", yaxis_title=None)
+    style_fig(fig, height=max(280, 30 * len(df)), show_legend=False)
+    st.caption("Race winners at this circuit across all ingested seasons.")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def render_lap_time_distributions(season: int, round_num: int) -> None:
@@ -620,12 +666,13 @@ def main() -> None:
         label = st.sidebar.selectbox("Race", list(race_labels))
         selected_round = race_labels[label]
 
-    tab1, tab7, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    tab1, tab7, tab2, tab3, tab8, tab4, tab5, tab6 = st.tabs(
         [
             "🏆 Driver performance",
             "🏭 Constructors",
             "⏱️ Lap-time distributions",
             "🛞 Race strategy",
+            "🏁 Circuits",
             "📈 Telemetry",
             "🆚 Head-to-head",
             "🔮 What-if",
@@ -635,6 +682,8 @@ def main() -> None:
         render_driver_performance(season, standings, races)
     with tab7:
         render_constructors(season, constructors)
+    with tab8:
+        render_circuits()
     with tab2:
         if selected_round is not None:
             render_lap_time_distributions(season, selected_round)
