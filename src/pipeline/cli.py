@@ -274,5 +274,61 @@ def sessions(year: int) -> None:
             )
 
 
+@main.command("train-model")
+@click.option("--test-fraction", default=0.2, type=float, help="Hold-out fraction for evaluation")
+def train_model(test_fraction: float) -> None:
+    """Train the race-points model on all ingested results and save it."""
+    # Imported lazily so the ML extra is only required for this command.
+    from src.ml.features import build_features
+    from src.ml.model import evaluate, save_model
+    from src.ml.model import train_model as fit_model
+
+    with F1Database() as db:
+        rows = db.get_results_frame()
+    features = build_features(rows)
+    if len(features) < 10:
+        click.echo("Not enough data to train (need at least 10 result rows).", err=True)
+        sys.exit(1)
+
+    result = evaluate(features, test_fraction=test_fraction)
+    path = save_model(fit_model(features))
+    click.echo(f"Model trained on {len(features)} rows and saved to {path}")
+    click.echo(
+        f"  MAE {result.mae:.2f} pts (baseline {result.baseline_mae:.2f}) · "
+        f"R² {result.r2:.3f} · train/test {result.n_train}/{result.n_test}"
+    )
+    click.echo("  Top features:")
+    top = sorted(result.feature_importances.items(), key=lambda kv: kv[1], reverse=True)[:3]
+    for col, imp in top:
+        click.echo(f"    {col}: {imp:.2f}")
+
+
+@main.command()
+@click.option("--season", "-s", required=True, type=int, help="Season year")
+@click.option("--round", "-r", "round_num", required=True, type=int, help="Race round number")
+def predict(season: int, round_num: int) -> None:
+    """Predict driver points for an ingested race using the trained model."""
+    from src.ml.features import build_features
+    from src.ml.model import DEFAULT_MODEL_PATH, load_model
+    from src.ml.model import predict as predict_points
+
+    if not DEFAULT_MODEL_PATH.exists():
+        click.echo("No trained model found. Run `f1-pipeline train-model` first.", err=True)
+        sys.exit(1)
+
+    with F1Database() as db:
+        rows = db.get_results_frame()
+    features = build_features(rows)
+    race = features[(features["season"] == season) & (features["round"] == round_num)]
+    if race.empty:
+        click.echo(f"No ingested data for season {season} round {round_num}.", err=True)
+        sys.exit(1)
+
+    ranked = predict_points(load_model(), race)
+    click.echo(f"Predicted points — {season} round {round_num}:")
+    for _, row in ranked.iterrows():
+        click.echo(f"  {row['driver_ref']:<18} {row['predicted_points']:5.1f}")
+
+
 if __name__ == "__main__":
     main()
