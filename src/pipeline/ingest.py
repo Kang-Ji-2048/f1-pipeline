@@ -196,8 +196,21 @@ def ingest_season(season_year: int) -> dict[str, int]:
         counts["lap_times"] = lap_count
         counts["pit_stops"] = pit_count
 
+    _warn_zero_counts(counts)
     logger.info("season_ingested", season=season_year, counts=counts)
     return counts
+
+
+def _warn_zero_counts(counts: dict[str, int]) -> list[str]:
+    """Log a warning for every table that ingested zero rows and return them.
+
+    A silent partial load (e.g. an endpoint returned nothing) is easy to miss;
+    surfacing zero-row tables makes it visible in logs and to callers.
+    """
+    warnings = [f"{table} ingested 0 rows" for table, count in counts.items() if count == 0]
+    for message in warnings:
+        logger.warning("zero_row_table", detail=message)
+    return warnings
 
 
 # ── OpenF1 ingestion ─────────────────────────────────────────────────────────
@@ -247,6 +260,7 @@ def ingest_telemetry(
             logger.info("session_telemetry_ingested", session_key=sk, count=session_total)
         counts["telemetry_samples"] = telem_count
 
+    _warn_zero_counts(counts)
     logger.info("telemetry_ingested", year=year, counts=counts)
     return counts
 

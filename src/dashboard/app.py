@@ -4,9 +4,9 @@ Run with::
 
     streamlit run src/dashboard/app.py
 
-Reads from the same PostgreSQL database as the pipeline (via ``DATABASE_URL``)
-and renders three views: driver performance, lap-time distributions, and race
-strategy (stints and pit stops).
+Reads from the same PostgreSQL database as the pipeline (via ``DATABASE_URL``).
+All database reads go through small ``@st.cache_data`` loader functions so that
+switching between views does not re-query the database every time.
 """
 
 from __future__ import annotations
@@ -23,17 +23,114 @@ from src.analysis.projections import championship_scenarios
 from src.dashboard.theme import ACCENT, FADED, MUTED, PALETTE, style_fig
 from src.db.queries import F1Database
 
+_CACHE_TTL = 600  # seconds
 
-def _load_seasons() -> list[int]:
+
+# ── Cached data-access layer ─────────────────────────────────────────────────
+# Each loader opens its own short-lived session and returns plain, cacheable
+# data. Streamlit memoises the return value keyed on the arguments.
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_seasons() -> list[int]:
     with F1Database() as db:
         return db.get_seasons()
 
 
+@st.cache_data(ttl=_CACHE_TTL)
+def load_driver_standings(season: int) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_driver_standings(season)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_constructor_standings(season: int) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_constructor_standings(season)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_races(season: int) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_races(season)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_race_results(season: int, round_num: int) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_race_results(season, round_num)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_driver_results(season: int, driver_ref: str) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_driver_results(season, driver_ref)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_lap_time_distribution(season: int, round_num: int) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_lap_time_distribution(season, round_num)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_stints(season: int, round_num: int) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_stints(season, round_num)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_pit_stops(season: int, round_num: int) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_pit_stops(season, round_num)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_sessions(year: int) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_sessions(year)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_telemetry_drivers(session_key: int) -> list[int]:
+    with F1Database() as db:
+        return db.get_telemetry_drivers(session_key)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
+def load_telemetry(session_key: int, driver_number: int) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_telemetry(session_key, driver_number, limit=5000)
+
+
+# ── Small helpers ────────────────────────────────────────────────────────────
+
+
+def _fmt_laptime(millis: int) -> str:
+    """Format milliseconds as a lap time, e.g. 90500 -> '1:30.500'."""
+    total = millis / 1000.0
+    minutes = int(total // 60)
+    return f"{minutes}:{total - minutes * 60:06.3f}"
+
+
+def _sum_points(results: list[dict[str, Any]]) -> float:
+    return sum(r["points"] for r in results)
+
+
+def _count(results: list[dict[str, Any]], max_pos: int) -> int:
+    return sum(1 for r in results if r["position"] is not None and r["position"] <= max_pos)
+
+
+def _avg_finish(results: list[dict[str, Any]]) -> float:
+    finishes = [r["position"] for r in results if r["position"] is not None]
+    return sum(finishes) / len(finishes) if finishes else 0.0
+
+
+# ── Views ────────────────────────────────────────────────────────────────────
+
+
 def render_driver_performance(
-    db: F1Database,
-    season: int,
-    standings: list[dict[str, Any]],
-    races: list[dict[str, Any]],
+    season: int, standings: list[dict[str, Any]], races: list[dict[str, Any]]
 ) -> None:
     """Championship standings plus cumulative points progression per round."""
     if not standings:
@@ -66,7 +163,7 @@ def render_driver_performance(
         series: dict[str, dict[str, list[float]]] = {}
         for race in races:
             rnd = float(race["round"])
-            for result in db.get_race_results(season, race["round"]):
+            for result in load_race_results(season, race["round"]):
                 ref = str(result["driver_ref"])
                 running[ref] = running.get(ref, 0.0) + float(result["points"] or 0.0)
                 pt = series.setdefault(ref, {"x": [], "y": []})
@@ -105,16 +202,9 @@ def render_driver_performance(
             st.plotly_chart(fig, use_container_width=True)
 
 
-def _fmt_laptime(millis: int) -> str:
-    """Format milliseconds as a lap time, e.g. 90500 -> '1:30.500'."""
-    total = millis / 1000.0
-    minutes = int(total // 60)
-    return f"{minutes}:{total - minutes * 60:06.3f}"
-
-
-def render_lap_time_distributions(db: F1Database, season: int, round_num: int) -> None:
+def render_lap_time_distributions(season: int, round_num: int) -> None:
     """Pace summary cards plus a lap-time distribution box per driver."""
-    rows = db.get_lap_time_distribution(season, round_num)
+    rows = load_lap_time_distribution(season, round_num)
     if not rows:
         st.info("No lap-time data ingested for this race yet.")
         return
@@ -169,9 +259,9 @@ def render_lap_time_distributions(db: F1Database, season: int, round_num: int) -
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_race_strategy(db: F1Database, season: int, round_num: int) -> None:
+def render_race_strategy(season: int, round_num: int) -> None:
     """Stint lengths and pit-stop laps for the selected race."""
-    stints = db.get_stints(season, round_num)
+    stints = load_stints(season, round_num)
     if not stints:
         st.info("No stint/pit data ingested for this race yet.")
         return
@@ -192,7 +282,7 @@ def render_race_strategy(db: F1Database, season: int, round_num: int) -> None:
     st.caption("Each segment is a stint between pit stops; total bar length is race distance.")
     st.plotly_chart(fig, use_container_width=True)
 
-    pits = db.get_pit_stops(season, round_num)
+    pits = load_pit_stops(season, round_num)
     if pits:
         with st.expander(f"Pit stops ({len(pits)})"):
             pit_df = pd.DataFrame(pits)[["driver_ref", "stop", "lap", "time_of_day"]]
@@ -209,24 +299,8 @@ def render_race_strategy(db: F1Database, season: int, round_num: int) -> None:
             )
 
 
-def _sum_points(results: list[dict[str, Any]]) -> float:
-    return sum(r["points"] for r in results)
-
-
-def _count(results: list[dict[str, Any]], max_pos: int) -> int:
-    return sum(1 for r in results if r["position"] is not None and r["position"] <= max_pos)
-
-
-def _avg_finish(results: list[dict[str, Any]]) -> float:
-    finishes = [r["position"] for r in results if r["position"] is not None]
-    return sum(finishes) / len(finishes) if finishes else 0.0
-
-
 def render_head_to_head(
-    db: F1Database,
-    season: int,
-    standings: list[dict[str, Any]],
-    selected_round: int | None,
+    season: int, standings: list[dict[str, Any]], selected_round: int | None
 ) -> None:
     """Side-by-side comparison of two drivers across the season."""
     refs = [str(s["driver_ref"]) for s in standings]
@@ -241,7 +315,7 @@ def render_head_to_head(
         st.info("Pick two different drivers.")
         return
 
-    results = {ref: db.get_driver_results(season, ref) for ref in (driver_a, driver_b)}
+    results = {ref: load_driver_results(season, ref) for ref in (driver_a, driver_b)}
     colours = {driver_a: PALETTE[0], driver_b: PALETTE[1]}
 
     # ── Comparison tiles (delta on A relative to B) ──────────────────────────
@@ -301,7 +375,7 @@ def render_head_to_head(
 
     # ── Lap-time distribution for the selected race ──────────────────────────
     if selected_round is not None:
-        rows = db.get_lap_time_distribution(season, selected_round)
+        rows = load_lap_time_distribution(season, selected_round)
         pair = [r for r in rows if r["driver_ref"] in (driver_a, driver_b)]
         if pair:
             df = pd.DataFrame(pair)
@@ -335,8 +409,6 @@ def render_championship_whatif(season: int, standings: list[dict[str, Any]]) -> 
         f"with {remaining} race(s) left (assuming 25 pts/win)."
     )
 
-    # Stacked bar: points already secured + points still available, vs the
-    # leader's current total (the line a rival must be able to reach).
     segments: list[dict[str, Any]] = []
     for s in scenarios:
         segments.append({"driver": s["driver_ref"], "segment": "Secured", "points": s["current"]})
@@ -368,13 +440,12 @@ def render_championship_whatif(season: int, standings: list[dict[str, Any]]) -> 
     )
     style_fig(fig, height=max(340, 26 * len(scenarios)))
     st.plotly_chart(fig, use_container_width=True)
-
     st.caption("Bars reaching the dashed line can still catch a stalled leader.")
 
 
-def render_telemetry(db: F1Database, season: int) -> None:
+def render_telemetry(season: int) -> None:
     """Speed / throttle & brake / gear traces for one driver in an OpenF1 session."""
-    sessions = db.get_sessions(season)
+    sessions = load_sessions(season)
     if not sessions:
         st.info("No OpenF1 sessions ingested for this season yet (`f1-pipeline ingest-openf1`).")
         return
@@ -388,13 +459,13 @@ def render_telemetry(db: F1Database, season: int) -> None:
     col_s, col_d = st.columns(2)
     session_key = labels[col_s.selectbox("Session", list(labels))]
 
-    drivers = db.get_telemetry_drivers(session_key)
+    drivers = load_telemetry_drivers(session_key)
     if not drivers:
         st.info("No telemetry ingested for this session yet.")
         return
     driver_number = col_d.selectbox("Car number", drivers)
 
-    rows = db.get_telemetry(session_key, driver_number, limit=5000)
+    rows = load_telemetry(session_key, driver_number)
     if not rows:
         st.info("No telemetry samples for this driver.")
         return
@@ -440,62 +511,61 @@ def main() -> None:
     )
     st.title("🏎️ F1 Data Dashboard")
 
-    seasons = _load_seasons()
+    seasons = load_seasons()
     if not seasons:
         st.warning("No seasons ingested yet. Run the pipeline first (`f1-pipeline ingest-all`).")
         return
 
     season = st.sidebar.selectbox("Season", seasons, index=len(seasons) - 1)
 
-    with F1Database() as db:
-        standings = db.get_driver_standings(season)
-        constructors = db.get_constructor_standings(season)
-        races = db.get_races(season)
+    standings = load_driver_standings(season)
+    constructors = load_constructor_standings(season)
+    races = load_races(season)
 
-        # ── Season summary tiles ─────────────────────────────────────────────
-        leader = standings[0] if standings else None
-        top_team = constructors[0] if constructors else None
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Points leader", str(leader["driver_ref"]) if leader else "—")
-        c2.metric("Leader points", f"{leader['total_points']:.0f}" if leader else "—")
-        c3.metric("Leading constructor", str(top_team["constructor_ref"]) if top_team else "—")
-        c4.metric("Races", len(races))
-        st.divider()
+    # ── Season summary tiles ─────────────────────────────────────────────────
+    leader = standings[0] if standings else None
+    top_team = constructors[0] if constructors else None
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Points leader", str(leader["driver_ref"]) if leader else "—")
+    c2.metric("Leader points", f"{leader['total_points']:.0f}" if leader else "—")
+    c3.metric("Leading constructor", str(top_team["constructor_ref"]) if top_team else "—")
+    c4.metric("Races", len(races))
+    st.divider()
 
-        race_labels = {f"R{r['round']:02d} — {r['name']}": r["round"] for r in races}
-        selected_round = None
-        if race_labels:
-            label = st.sidebar.selectbox("Race", list(race_labels))
-            selected_round = race_labels[label]
+    race_labels = {f"R{r['round']:02d} — {r['name']}": r["round"] for r in races}
+    selected_round = None
+    if race_labels:
+        label = st.sidebar.selectbox("Race", list(race_labels))
+        selected_round = race_labels[label]
 
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-            [
-                "🏆 Driver performance",
-                "⏱️ Lap-time distributions",
-                "🛞 Race strategy",
-                "📈 Telemetry",
-                "🆚 Head-to-head",
-                "🔮 What-if",
-            ]
-        )
-        with tab1:
-            render_driver_performance(db, season, standings, races)
-        with tab2:
-            if selected_round is not None:
-                render_lap_time_distributions(db, season, selected_round)
-            else:
-                st.info("No races available for this season.")
-        with tab3:
-            if selected_round is not None:
-                render_race_strategy(db, season, selected_round)
-            else:
-                st.info("No races available for this season.")
-        with tab4:
-            render_telemetry(db, season)
-        with tab5:
-            render_head_to_head(db, season, standings, selected_round)
-        with tab6:
-            render_championship_whatif(season, standings)
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        [
+            "🏆 Driver performance",
+            "⏱️ Lap-time distributions",
+            "🛞 Race strategy",
+            "📈 Telemetry",
+            "🆚 Head-to-head",
+            "🔮 What-if",
+        ]
+    )
+    with tab1:
+        render_driver_performance(season, standings, races)
+    with tab2:
+        if selected_round is not None:
+            render_lap_time_distributions(season, selected_round)
+        else:
+            st.info("No races available for this season.")
+    with tab3:
+        if selected_round is not None:
+            render_race_strategy(season, selected_round)
+        else:
+            st.info("No races available for this season.")
+    with tab4:
+        render_telemetry(season)
+    with tab5:
+        render_head_to_head(season, standings, selected_round)
+    with tab6:
+        render_championship_whatif(season, standings)
 
 
 if __name__ == "__main__":

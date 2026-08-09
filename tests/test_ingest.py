@@ -211,3 +211,16 @@ class TestIngestLive:
 
         assert counts == {"telemetry_samples": 0, "iterations": 1}
         mock_upsert.assert_not_called()
+
+
+class TestWarnZeroCounts:
+    def test_flags_only_zero_row_tables(self):
+        from src.pipeline.ingest import _warn_zero_counts
+
+        warnings = _warn_zero_counts({"drivers": 20, "lap_times": 0, "pit_stops": 0, "races": 24})
+        assert warnings == ["lap_times ingested 0 rows", "pit_stops ingested 0 rows"]
+
+    def test_empty_when_all_populated(self):
+        from src.pipeline.ingest import _warn_zero_counts
+
+        assert _warn_zero_counts({"drivers": 20, "races": 24}) == []

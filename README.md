@@ -10,7 +10,8 @@ An end-to-end, production-style data pipeline that ingests Formula 1 telemetry, 
 - **Resilient ingestion** — HTTP clients use exponential-backoff retries (Tenacity) and structured logging (structlog).
 - **Validated at the boundary** — incoming records are parsed and validated with Pydantic before they ever reach the database.
 - **Migrations, not guesswork** — schema is versioned with Alembic.
-- **Interactive dashboard** — a Streamlit + Plotly app visualises driver performance, lap-time distributions, and race strategy.
+- **Interactive dashboard** — a Streamlit + Plotly app with six views: driver performance, lap-time distributions, race strategy, telemetry traces, driver head-to-head, and a championship what-if projector.
+- **Analytics layer** — pure, unit-tested functions in [`src/analysis/`](src/analysis) (pace metrics, championship projections) kept separate from I/O.
 - **Containerised** — `docker compose up` brings up Postgres, the pipeline, and the dashboard together.
 - **Deployable** — ships with an EC2 runbook and S3 export for running in AWS (see [`deploy/`](deploy/README.md)).
 - **Tested and linted in CI** — GitHub Actions runs ruff, `mypy --strict`, and the pytest suite on every push/PR.
@@ -92,9 +93,17 @@ pip install -e ".[dashboard]"
 streamlit run src/dashboard/app.py
 ```
 
-Three views: **driver performance metrics**, **lap-time distributions**, and
-**race strategy patterns** (stints and pit stops). Reads from the same
-`DATABASE_URL`.
+Six views, all reading from the same `DATABASE_URL`:
+
+- **Driver performance** — standings and points progression.
+- **Lap-time distributions** — per-driver box plots plus fastest-lap / consistency pace cards.
+- **Race strategy** — stint lengths and pit stops.
+- **Telemetry** — speed / throttle-brake / gear traces per driver from OpenF1.
+- **Head-to-head** — compare two drivers across the season.
+- **What-if** — championship projection: who can still mathematically win.
+
+Read queries are cached (`st.cache_data`) so switching views doesn't re-hit the
+database each time.
 
 ## Deployment (AWS)
 
@@ -115,6 +124,10 @@ Set via environment variables or a `.env` file:
 | `BATCH_SIZE` | `500` | Rows per upsert batch |
 | `MAX_RETRIES` | `3` | HTTP retry attempts |
 | `RETRY_BACKOFF` | `2.0` | Exponential backoff multiplier |
+| `RATE_LIMIT_DELAY` | `0.5` | Minimum seconds between HTTP requests (stays under API rate limits) |
+| `LIVE_POLL_INTERVAL` | `5.0` | Default seconds between polls in `live` mode |
+| `S3_BUCKET` | _(unset)_ | Target bucket for `export-s3` |
+| `S3_PREFIX` | `f1-pipeline` | Key prefix for S3 exports |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 
 ## Testing
