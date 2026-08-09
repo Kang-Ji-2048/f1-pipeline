@@ -18,7 +18,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.dashboard.theme import ACCENT, FADED, PALETTE, style_fig
+from src.analysis.projections import championship_scenarios
+from src.dashboard.theme import ACCENT, FADED, MUTED, PALETTE, style_fig
 from src.db.queries import F1Database
 
 
@@ -280,6 +281,58 @@ def render_head_to_head(
             st.plotly_chart(fig, use_container_width=True)
 
 
+def render_championship_whatif(season: int, standings: list[dict[str, Any]]) -> None:
+    """Title projection: who can still mathematically win, given remaining races."""
+    if not standings:
+        st.info("No standings ingested for this season yet.")
+        return
+
+    remaining = int(st.number_input("Remaining races", min_value=0, max_value=24, value=5, step=1))
+    scenarios = championship_scenarios(standings, remaining)
+    leader_current = scenarios[0]["current"]
+    contenders = [s for s in scenarios if s["can_win"]]
+    st.caption(
+        f"{len(contenders)} of {len(scenarios)} drivers can still mathematically win "
+        f"with {remaining} race(s) left (assuming 25 pts/win)."
+    )
+
+    # Stacked bar: points already secured + points still available, vs the
+    # leader's current total (the line a rival must be able to reach).
+    segments: list[dict[str, Any]] = []
+    for s in scenarios:
+        segments.append({"driver": s["driver_ref"], "segment": "Secured", "points": s["current"]})
+        segments.append(
+            {
+                "driver": s["driver_ref"],
+                "segment": "Still available",
+                "points": s["max_possible"] - s["current"],
+            }
+        )
+    fig = px.bar(
+        pd.DataFrame(segments),
+        x="points",
+        y="driver",
+        color="segment",
+        orientation="h",
+        color_discrete_map={"Secured": ACCENT, "Still available": FADED},
+        category_orders={"driver": [s["driver_ref"] for s in reversed(scenarios)]},
+    )
+    fig.update_traces(marker_line_width=0)
+    fig.update_layout(barmode="stack", xaxis_title="Points", yaxis_title=None)
+    fig.add_vline(
+        x=leader_current,
+        line_width=2,
+        line_dash="dash",
+        line_color=MUTED,
+        annotation_text="Leader threshold",
+        annotation_position="top",
+    )
+    style_fig(fig, height=max(340, 26 * len(scenarios)))
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.caption("Bars reaching the dashed line can still catch a stalled leader.")
+
+
 def render_telemetry(db: F1Database, season: int) -> None:
     """Speed / throttle & brake / gear traces for one driver in an OpenF1 session."""
     sessions = db.get_sessions(season)
@@ -376,13 +429,14 @@ def main() -> None:
             label = st.sidebar.selectbox("Race", list(race_labels))
             selected_round = race_labels[label]
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
             [
                 "🏆 Driver performance",
                 "⏱️ Lap-time distributions",
                 "🛞 Race strategy",
                 "📈 Telemetry",
                 "🆚 Head-to-head",
+                "🔮 What-if",
             ]
         )
         with tab1:
@@ -401,6 +455,8 @@ def main() -> None:
             render_telemetry(db, season)
         with tab5:
             render_head_to_head(db, season, standings, selected_round)
+        with tab6:
+            render_championship_whatif(season, standings)
 
 
 if __name__ == "__main__":
