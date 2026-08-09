@@ -76,3 +76,43 @@ class TestExportS3Command:
         assert "f1/2024/races.csv" in result.output
         args, _ = mock_export.call_args
         assert args[1] == "my-bucket"
+
+
+class TestTrainModelCommand:
+    def test_trains_and_reports_metrics(self, tmp_path):
+        from tests.test_model import _synthetic_rows
+
+        runner = CliRunner()
+        with (
+            patch("src.pipeline.cli.F1Database") as mock_db_cls,
+            patch("src.ml.model.save_model") as mock_save,
+        ):
+            mock_db = mock_db_cls.return_value.__enter__.return_value
+            mock_db.get_results_frame.return_value = _synthetic_rows(14)
+            mock_save.return_value = tmp_path / "m.joblib"
+            result = runner.invoke(main, ["train-model", "--test-fraction", "0.25"])
+
+        assert result.exit_code == 0, result.output
+        assert "Model trained on" in result.output
+        assert "MAE" in result.output
+
+    def test_errors_with_insufficient_data(self):
+        runner = CliRunner()
+        with patch("src.pipeline.cli.F1Database") as mock_db_cls:
+            mock_db = mock_db_cls.return_value.__enter__.return_value
+            mock_db.get_results_frame.return_value = []
+            result = runner.invoke(main, ["train-model"])
+
+        assert result.exit_code == 1
+        assert "Not enough data" in result.output
+
+
+class TestPredictCommand:
+    def test_errors_without_trained_model(self):
+        runner = CliRunner()
+        with patch("src.ml.model.DEFAULT_MODEL_PATH") as mock_path:
+            mock_path.exists.return_value = False
+            result = runner.invoke(main, ["predict", "--season", "2023", "--round", "1"])
+
+        assert result.exit_code == 1
+        assert "No trained model" in result.output

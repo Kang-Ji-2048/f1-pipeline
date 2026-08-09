@@ -350,3 +350,60 @@ class TestCircuitInsights:
         assert db.get_circuit_winners("spa") == [{"driver_ref": "lec", "wins": 1}]
         assert db.get_circuit_winners("none") == []
         session.close()
+
+
+class TestResultsFrame:
+    def test_returns_training_rows_ordered_by_date(self):
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        session = Session(engine)
+        session.add_all(
+            [
+                Race(
+                    id=1,
+                    season_year=2023,
+                    round=2,
+                    name="R2",
+                    circuit_ref="spa",
+                    date=date(2023, 4, 1),
+                ),
+                Race(
+                    id=2,
+                    season_year=2023,
+                    round=1,
+                    name="R1",
+                    circuit_ref="monza",
+                    date=date(2023, 3, 1),
+                ),
+                RaceResult(
+                    id=1,
+                    race_id=1,
+                    driver_ref="ver",
+                    constructor_ref="rb",
+                    grid=1,
+                    position=1,
+                    points=25.0,
+                    status="F",
+                ),
+                RaceResult(
+                    id=2,
+                    race_id=2,
+                    driver_ref="ver",
+                    constructor_ref="rb",
+                    grid=2,
+                    position=2,
+                    points=18.0,
+                    status="F",
+                ),
+            ]
+        )
+        session.commit()
+
+        db = F1Database(session=session)
+        frame = db.get_results_frame()
+        # ordered by date: monza (Mar) before spa (Apr)
+        assert [r["circuit_ref"] for r in frame] == ["monza", "spa"]
+        assert frame[0]["grid"] == 2
+        assert frame[0]["points"] == 18.0
+        assert frame[1]["driver_ref"] == "ver"
+        session.close()

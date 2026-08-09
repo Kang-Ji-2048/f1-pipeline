@@ -235,6 +235,45 @@ class F1Database:
             for r in rows
         ]
 
+    def get_results_frame(self) -> list[dict[str, Any]]:
+        """Return one row per (race, driver) for model training/prediction.
+
+        Ordered by date then round so downstream feature engineering can compute
+        leakage-safe rolling stats. Includes the grid (qualifying) position, which
+        is known before the race, plus the finishing position and points target.
+        """
+        session = self._get_session()
+        rows = (
+            session.query(
+                Race.season_year,
+                Race.round,
+                Race.date,
+                Race.circuit_ref,
+                RaceResult.driver_ref,
+                RaceResult.constructor_ref,
+                RaceResult.grid,
+                RaceResult.position,
+                RaceResult.points,
+            )
+            .join(RaceResult, RaceResult.race_id == Race.id)
+            .order_by(Race.date, Race.round)
+            .all()
+        )
+        return [
+            {
+                "season": r.season_year,
+                "round": r.round,
+                "date": str(r.date),
+                "circuit_ref": r.circuit_ref,
+                "driver_ref": r.driver_ref,
+                "constructor_ref": r.constructor_ref,
+                "grid": r.grid,
+                "position": r.position,
+                "points": float(r.points or 0.0),
+            }
+            for r in rows
+        ]
+
     def get_circuits(self) -> list[dict[str, Any]]:
         """Return all circuits, sorted by name."""
         session = self._get_session()

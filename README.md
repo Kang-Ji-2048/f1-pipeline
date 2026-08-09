@@ -35,6 +35,7 @@ Ergast / OpenF1 API  ->  API clients (httpx + retries)  ->  Pydantic validators 
 | CLI | Click |
 | Logging | structlog |
 | Dashboard | Streamlit, Plotly, pandas |
+| ML | scikit-learn, joblib, numpy, pandas |
 | Cloud | Docker, docker-compose, AWS (EC2, S3 via boto3) |
 | Quality | pytest + pytest-cov, ruff, mypy (strict) |
 | CI | GitHub Actions |
@@ -114,6 +115,25 @@ a step-by-step runbook for running the Docker stack on AWS, plus S3 export:
 f1-pipeline export-s3 --season 2025   # uploads per-table CSVs to s3://$S3_BUCKET/$S3_PREFIX/2025/
 ```
 
+## Predictive model
+
+A gradient-boosting regressor predicts each driver's points for a race from
+**leakage-safe** features — qualifying grid position, rolling recent form (points
+and finishing position), season-to-date and constructor form, and the driver's
+history at that circuit. It is evaluated with a **time-ordered train/test split**
+(train on earlier races, test on later ones) against a linear-regression baseline,
+reporting MAE, R² and feature importances.
+
+```bash
+pip install -e ".[ml]"
+f1-pipeline train-model                      # train, evaluate, save to models/
+f1-pipeline predict --season 2025 --round 1  # ranked predicted points per driver
+```
+
+Feature engineering ([`src/ml/features.py`](src/ml/features.py)) and the model
+wrapper ([`src/ml/model.py`](src/ml/model.py)) are separated from I/O and unit
+tested without a database.
+
 ## Configuration
 
 Set via environment variables or a `.env` file:
@@ -143,5 +163,5 @@ pytest -m integration  # tests that require a live database
 
 ## Roadmap
 
-- Feed the pipeline output directly into a predictive model for F1 fantasy team selection.
+- Surface model predictions directly in the dashboard alongside live standings.
 - Persist live telemetry summaries into dedicated dashboard-friendly aggregate tables.
