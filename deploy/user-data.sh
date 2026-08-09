@@ -42,6 +42,7 @@ docker compose up -d --build
 
 # Initialise the schema and ingest the current season on first boot.
 docker compose run --rm pipeline init-db
-docker compose run --rm pipeline ingest-all --season "$(date +%Y)"
+docker compose run --rm pipeline ingest-ergast --season "$(date +%Y)" \
+  || echo "WARN: initial ingest failed; run it manually later (see deploy/README.md)."
 
 echo "F1 pipeline stack is up. Dashboard: http://<instance-public-ip>:8501"
