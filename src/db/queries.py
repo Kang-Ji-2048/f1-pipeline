@@ -234,6 +234,24 @@ class F1Database:
             for r in rows
         ]
 
+    def get_constructor_results(
+        self, season_year: int, constructor_ref: str
+    ) -> list[dict[str, Any]]:
+        """Return a constructor's points per round for a season (sum of both cars)."""
+        session = self._get_session()
+        rows = (
+            session.query(Race.round, func.sum(RaceResult.points).label("points"))
+            .join(RaceResult, RaceResult.race_id == Race.id)
+            .filter(
+                Race.season_year == season_year,
+                RaceResult.constructor_ref == constructor_ref,
+            )
+            .group_by(Race.round)
+            .order_by(Race.round)
+            .all()
+        )
+        return [{"round": r.round, "points": float(r.points or 0.0)} for r in rows]
+
     def get_driver_results(self, season_year: int, driver_ref: str) -> list[dict[str, Any]]:
         """Return a driver's per-round results for a season, ordered by round."""
         session = self._get_session()

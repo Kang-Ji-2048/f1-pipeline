@@ -50,6 +50,12 @@ def load_constructor_standings(season: int) -> list[dict[str, Any]]:
 
 
 @st.cache_data(ttl=_CACHE_TTL)
+def load_constructor_results(season: int, constructor_ref: str) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_constructor_results(season, constructor_ref)
+
+
+@st.cache_data(ttl=_CACHE_TTL)
 def load_races(season: int) -> list[dict[str, Any]]:
     with F1Database() as db:
         return db.get_races(season)
@@ -126,6 +132,18 @@ def _avg_finish(results: list[dict[str, Any]]) -> float:
     return sum(finishes) / len(finishes) if finishes else 0.0
 
 
+def _cumulative(results: list[dict[str, Any]]) -> tuple[list[float], list[float]]:
+    """Return (rounds, cumulative-points) from per-round points rows."""
+    rounds: list[float] = []
+    cumulative: list[float] = []
+    running = 0.0
+    for row in results:
+        running += float(row["points"])
+        rounds.append(float(row["round"]))
+        cumulative.append(running)
+    return rounds, cumulative
+
+
 # ── Views ────────────────────────────────────────────────────────────────────
 
 
@@ -200,6 +218,70 @@ def render_driver_performance(
             fig.update_layout(xaxis_title="Round", yaxis_title="Cumulative points")
             style_fig(fig, height=max(320, 24 * len(df)))
             st.plotly_chart(fig, use_container_width=True)
+
+
+def render_constructors(season: int, constructors: list[dict[str, Any]]) -> None:
+    """Constructor standings and cumulative points progression (top 6 highlighted)."""
+    if not constructors:
+        st.info("No constructor results ingested for this season yet.")
+        return
+
+    left, right = st.columns([1, 1], gap="large")
+
+    with left:
+        st.markdown("**Constructor standings**")
+        df = pd.DataFrame(constructors).sort_values("total_points")
+        fig = px.bar(
+            df, x="total_points", y="constructor_ref", orientation="h", text="total_points"
+        )
+        fig.update_traces(
+            marker_color=ACCENT,
+            texttemplate="%{text:.0f}",
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate="%{y}: %{x:.0f} pts<extra></extra>",
+        )
+        fig.update_layout(xaxis_title="Points", yaxis_title=None)
+        style_fig(fig, height=max(320, 30 * len(df)), show_legend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with right:
+        st.markdown("**Points progression by round**")
+        top6 = [str(c["constructor_ref"]) for c in constructors[:6]]
+        fig = go.Figure()
+        for c in constructors:  # faded field first
+            ref = str(c["constructor_ref"])
+            if ref in top6:
+                continue
+            xs, ys = _cumulative(load_constructor_results(season, ref))
+            if xs:
+                fig.add_trace(
+                    go.Scatter(
+                        x=xs,
+                        y=ys,
+                        mode="lines",
+                        line=dict(color=FADED, width=1),
+                        showlegend=False,
+                        hoverinfo="skip",
+                    )
+                )
+        for i, ref in enumerate(top6):
+            xs, ys = _cumulative(load_constructor_results(season, ref))
+            if xs:
+                fig.add_trace(
+                    go.Scatter(
+                        x=xs,
+                        y=ys,
+                        mode="lines+markers",
+                        name=ref,
+                        line=dict(color=PALETTE[i], width=2),
+                        marker=dict(size=7),
+                        hovertemplate=f"{ref} · R%{{x:.0f}}: %{{y:.0f}} pts<extra></extra>",
+                    )
+                )
+        fig.update_layout(xaxis_title="Round", yaxis_title="Cumulative points")
+        style_fig(fig, height=max(320, 30 * len(constructors)))
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def render_lap_time_distributions(season: int, round_num: int) -> None:
@@ -538,9 +620,10 @@ def main() -> None:
         label = st.sidebar.selectbox("Race", list(race_labels))
         selected_round = race_labels[label]
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    tab1, tab7, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         [
             "🏆 Driver performance",
+            "🏭 Constructors",
             "⏱️ Lap-time distributions",
             "🛞 Race strategy",
             "📈 Telemetry",
@@ -550,6 +633,8 @@ def main() -> None:
     )
     with tab1:
         render_driver_performance(season, standings, races)
+    with tab7:
+        render_constructors(season, constructors)
     with tab2:
         if selected_round is not None:
             render_lap_time_distributions(season, selected_round)

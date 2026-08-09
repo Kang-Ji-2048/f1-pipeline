@@ -186,3 +186,75 @@ class TestDriverResults:
         ]
         assert db.get_driver_results(2023, "nobody") == []
         session.close()
+
+
+class TestConstructorResults:
+    def test_sums_points_per_round(self):
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        session = Session(engine)
+        session.add_all(
+            [
+                Race(
+                    id=1,
+                    season_year=2023,
+                    round=1,
+                    name="R1",
+                    circuit_ref="c",
+                    date=date(2023, 3, 5),
+                ),
+                Race(
+                    id=2,
+                    season_year=2023,
+                    round=2,
+                    name="R2",
+                    circuit_ref="c",
+                    date=date(2023, 3, 12),
+                ),
+                RaceResult(
+                    id=1,
+                    race_id=1,
+                    driver_ref="nor",
+                    constructor_ref="mclaren",
+                    position=1,
+                    points=25.0,
+                    status="F",
+                ),
+                RaceResult(
+                    id=2,
+                    race_id=1,
+                    driver_ref="pia",
+                    constructor_ref="mclaren",
+                    position=3,
+                    points=15.0,
+                    status="F",
+                ),
+                RaceResult(
+                    id=3,
+                    race_id=2,
+                    driver_ref="nor",
+                    constructor_ref="mclaren",
+                    position=2,
+                    points=18.0,
+                    status="F",
+                ),
+                RaceResult(
+                    id=4,
+                    race_id=1,
+                    driver_ref="ver",
+                    constructor_ref="red_bull",
+                    position=2,
+                    points=18.0,
+                    status="F",
+                ),
+            ]
+        )
+        session.commit()
+
+        db = F1Database(session=session)
+        assert db.get_constructor_results(2023, "mclaren") == [
+            {"round": 1, "points": 40.0},
+            {"round": 2, "points": 18.0},
+        ]
+        assert db.get_constructor_results(2023, "nobody") == []
+        session.close()
