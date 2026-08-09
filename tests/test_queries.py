@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from src.db.queries import F1Database
-from src.db.schema import Base, LapTime, PitStop, Race
+from src.db.schema import Base, LapTime, PitStop, Race, TelemetrySample
 
 
 @pytest.fixture()
@@ -94,3 +94,32 @@ class TestStints:
     def test_empty_for_unknown_race(self, seeded_session):
         db = F1Database(session=seeded_session)
         assert db.get_stints(2023, 99) == []
+
+
+class TestTelemetryDrivers:
+    def test_returns_sorted_unique_driver_numbers(self):
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        session = Session(engine)
+        session.add_all(
+            [
+                TelemetrySample(
+                    id=1, session_key=9001, driver_number=44, date=datetime(2023, 3, 5, 15, 0, 0)
+                ),
+                TelemetrySample(
+                    id=2, session_key=9001, driver_number=1, date=datetime(2023, 3, 5, 15, 0, 1)
+                ),
+                TelemetrySample(
+                    id=3, session_key=9001, driver_number=44, date=datetime(2023, 3, 5, 15, 0, 2)
+                ),
+                TelemetrySample(
+                    id=4, session_key=9002, driver_number=16, date=datetime(2023, 3, 5, 16, 0, 0)
+                ),
+            ]
+        )
+        session.commit()
+
+        db = F1Database(session=session)
+        assert db.get_telemetry_drivers(9001) == [1, 44]
+        assert db.get_telemetry_drivers(9999) == []
+        session.close()

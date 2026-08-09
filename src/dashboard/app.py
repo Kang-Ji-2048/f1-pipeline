@@ -169,6 +169,61 @@ def render_race_strategy(db: F1Database, season: int, round_num: int) -> None:
             )
 
 
+def render_telemetry(db: F1Database, season: int) -> None:
+    """Speed / throttle & brake / gear traces for one driver in an OpenF1 session."""
+    sessions = db.get_sessions(season)
+    if not sessions:
+        st.info("No OpenF1 sessions ingested for this season yet (`f1-pipeline ingest-openf1`).")
+        return
+
+    labels = {
+        (f"{s['session_name'] or s['session_type'] or 'Session'} — {s['location'] or ''}").strip(
+            " —"
+        ): s["session_key"]
+        for s in sessions
+    }
+    col_s, col_d = st.columns(2)
+    session_key = labels[col_s.selectbox("Session", list(labels))]
+
+    drivers = db.get_telemetry_drivers(session_key)
+    if not drivers:
+        st.info("No telemetry ingested for this session yet.")
+        return
+    driver_number = col_d.selectbox("Car number", drivers)
+
+    rows = db.get_telemetry(session_key, driver_number, limit=5000)
+    if not rows:
+        st.info("No telemetry samples for this driver.")
+        return
+
+    df = pd.DataFrame(rows)
+    df["t"] = pd.to_datetime(df["date"], format="mixed")
+    df["elapsed"] = (df["t"] - df["t"].min()).dt.total_seconds()
+    st.caption(f"{len(df):,} samples · car #{driver_number}")
+
+    speed = px.line(df, x="elapsed", y="speed")
+    speed.update_traces(line=dict(color=ACCENT, width=2))
+    speed.update_layout(xaxis_title="Elapsed (s)", yaxis_title="Speed (km/h)")
+    style_fig(speed, height=260, show_legend=False)
+    st.plotly_chart(speed, use_container_width=True)
+
+    pedals = px.line(
+        df,
+        x="elapsed",
+        y=["throttle", "brake"],
+        color_discrete_map={"throttle": "#1baf7a", "brake": "#e34948"},
+    )
+    pedals.update_layout(xaxis_title="Elapsed (s)", yaxis_title="%")
+    style_fig(pedals, height=240)
+    st.plotly_chart(pedals, use_container_width=True)
+
+    gear = px.line(df, x="elapsed", y="gear", line_shape="hv")
+    gear.update_traces(line=dict(color=PALETTE[6], width=2))
+    gear.update_layout(xaxis_title="Elapsed (s)", yaxis_title="Gear")
+    style_fig(gear, height=220, show_legend=False)
+    st.plotly_chart(gear, use_container_width=True)
+
+
 def main() -> None:
     st.set_page_config(page_title="F1 Data Dashboard", page_icon="🏎️", layout="wide")
     st.markdown(
@@ -210,8 +265,13 @@ def main() -> None:
             label = st.sidebar.selectbox("Race", list(race_labels))
             selected_round = race_labels[label]
 
-        tab1, tab2, tab3 = st.tabs(
-            ["🏆 Driver performance", "⏱️ Lap-time distributions", "🛞 Race strategy"]
+        tab1, tab2, tab3, tab4 = st.tabs(
+            [
+                "🏆 Driver performance",
+                "⏱️ Lap-time distributions",
+                "🛞 Race strategy",
+                "📈 Telemetry",
+            ]
         )
         with tab1:
             render_driver_performance(db, season, standings, races)
@@ -225,6 +285,8 @@ def main() -> None:
                 render_race_strategy(db, season, selected_round)
             else:
                 st.info("No races available for this season.")
+        with tab4:
+            render_telemetry(db, season)
 
 
 if __name__ == "__main__":
