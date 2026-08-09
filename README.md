@@ -10,8 +10,9 @@ An end-to-end, production-style data pipeline that ingests Formula 1 telemetry, 
 - **Resilient ingestion** — HTTP clients use exponential-backoff retries (Tenacity) and structured logging (structlog).
 - **Validated at the boundary** — incoming records are parsed and validated with Pydantic before they ever reach the database.
 - **Migrations, not guesswork** — schema is versioned with Alembic.
-- **Interactive dashboard** — a Streamlit + Plotly app with six views: driver performance, lap-time distributions, race strategy, telemetry traces, driver head-to-head, and a championship what-if projector.
-- **Analytics layer** — pure, unit-tested functions in [`src/analysis/`](src/analysis) (pace metrics, championship projections) kept separate from I/O.
+- **Interactive dashboard** — a Streamlit + Plotly app with nine views: driver and constructor standings, lap-time and pace analysis, race strategy, circuit history, telemetry traces, driver head-to-head, a championship what-if projector, and ML-based points predictions.
+- **Predictive modelling** — a leakage-safe scikit-learn model forecasts each driver's race points, evaluated against a baseline on a time-ordered split, and surfaced via both the CLI and a dashboard tab.
+- **Analytics layer** — pure, unit-tested functions in [`src/analysis/`](src/analysis) (pace metrics, championship projections) and [`src/ml/`](src/ml) (feature engineering, the points model) kept separate from I/O.
 - **Containerised** — `docker compose up` brings up Postgres, the pipeline, and the dashboard together.
 - **Deployable** — ships with an EC2 runbook and S3 export for running in AWS (see [`deploy/`](deploy/README.md)).
 - **Tested and linted in CI** — GitHub Actions runs ruff, `mypy --strict`, and the pytest suite on every push/PR.
@@ -119,6 +120,13 @@ a step-by-step runbook for running the Docker stack on AWS, plus S3 export:
 f1-pipeline export-s3 --season 2025   # uploads per-table CSVs to s3://$S3_BUCKET/$S3_PREFIX/2025/
 ```
 
+To redeploy a running instance after merging changes, SSH in and run the update
+helper (pull + rebuild + force-recreate) — see the [deploy runbook](deploy/README.md):
+
+```bash
+cd /opt/f1-pipeline && sudo bash deploy/update.sh
+```
+
 ## Predictive model
 
 A gradient-boosting regressor predicts each driver's points for a race from
@@ -167,5 +175,5 @@ pytest -m integration  # tests that require a live database
 
 ## Roadmap
 
-- Surface model predictions directly in the dashboard alongside live standings.
 - Persist live telemetry summaries into dedicated dashboard-friendly aggregate tables.
+- Backfill multiple seasons to train the points model on a larger history.
