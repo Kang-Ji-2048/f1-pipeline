@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from src.db.queries import F1Database
-from src.db.schema import Base, LapTime, PitStop, Race, RaceResult, TelemetrySample
+from src.db.schema import Base, Circuit, LapTime, PitStop, Race, RaceResult, TelemetrySample
 
 
 @pytest.fixture()
@@ -257,4 +257,96 @@ class TestConstructorResults:
             {"round": 2, "points": 18.0},
         ]
         assert db.get_constructor_results(2023, "nobody") == []
+        session.close()
+
+
+class TestCircuitInsights:
+    def _seed(self):
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        session = Session(engine)
+        session.add_all(
+            [
+                Circuit(circuit_ref="monza", name="Monza"),
+                Circuit(circuit_ref="spa", name="Spa"),
+                Race(
+                    id=1,
+                    season_year=2022,
+                    round=1,
+                    name="Italian GP",
+                    circuit_ref="monza",
+                    date=date(2022, 9, 1),
+                ),
+                Race(
+                    id=2,
+                    season_year=2023,
+                    round=1,
+                    name="Italian GP",
+                    circuit_ref="monza",
+                    date=date(2023, 9, 1),
+                ),
+                Race(
+                    id=3,
+                    season_year=2023,
+                    round=2,
+                    name="Belgian GP",
+                    circuit_ref="spa",
+                    date=date(2023, 8, 1),
+                ),
+                RaceResult(
+                    id=1,
+                    race_id=1,
+                    driver_ref="ver",
+                    constructor_ref="rb",
+                    position=1,
+                    points=25.0,
+                    status="F",
+                ),
+                RaceResult(
+                    id=2,
+                    race_id=2,
+                    driver_ref="ver",
+                    constructor_ref="rb",
+                    position=1,
+                    points=25.0,
+                    status="F",
+                ),
+                RaceResult(
+                    id=3,
+                    race_id=2,
+                    driver_ref="lec",
+                    constructor_ref="fer",
+                    position=2,
+                    points=18.0,
+                    status="F",
+                ),
+                RaceResult(
+                    id=4,
+                    race_id=3,
+                    driver_ref="lec",
+                    constructor_ref="fer",
+                    position=1,
+                    points=25.0,
+                    status="F",
+                ),
+            ]
+        )
+        session.commit()
+        return session
+
+    def test_get_circuits_sorted(self):
+        session = self._seed()
+        db = F1Database(session=session)
+        assert db.get_circuits() == [
+            {"circuit_ref": "monza", "name": "Monza"},
+            {"circuit_ref": "spa", "name": "Spa"},
+        ]
+        session.close()
+
+    def test_circuit_winners_count_p1_across_seasons(self):
+        session = self._seed()
+        db = F1Database(session=session)
+        assert db.get_circuit_winners("monza") == [{"driver_ref": "ver", "wins": 2}]
+        assert db.get_circuit_winners("spa") == [{"driver_ref": "lec", "wins": 1}]
+        assert db.get_circuit_winners("none") == []
         session.close()

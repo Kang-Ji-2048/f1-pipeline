@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from src.db.engine import get_session
 from src.db.schema import (
+    Circuit,
     Constructor,
     Driver,
     LapTime,
@@ -233,6 +234,29 @@ class F1Database:
             }
             for r in rows
         ]
+
+    def get_circuits(self) -> list[dict[str, Any]]:
+        """Return all circuits, sorted by name."""
+        session = self._get_session()
+        rows = session.query(Circuit).order_by(Circuit.name).all()
+        return [{"circuit_ref": c.circuit_ref, "name": c.name} for c in rows]
+
+    def get_circuit_winners(self, circuit_ref: str) -> list[dict[str, Any]]:
+        """Return race winners (P1 finishers) at a circuit across all seasons.
+
+        Ordered by win count, descending. The total across drivers equals the
+        number of races held at the circuit.
+        """
+        session = self._get_session()
+        rows = (
+            session.query(RaceResult.driver_ref, func.count().label("wins"))
+            .join(Race, RaceResult.race_id == Race.id)
+            .filter(Race.circuit_ref == circuit_ref, RaceResult.position == 1)
+            .group_by(RaceResult.driver_ref)
+            .order_by(func.count().desc(), RaceResult.driver_ref)
+            .all()
+        )
+        return [{"driver_ref": r.driver_ref, "wins": int(r.wins)} for r in rows]
 
     def get_constructor_results(
         self, season_year: int, constructor_ref: str
