@@ -234,6 +234,31 @@ class F1Database:
             for r in rows
         ]
 
+    def get_driver_results(self, season_year: int, driver_ref: str) -> list[dict[str, Any]]:
+        """Return a driver's per-round results for a season, ordered by round."""
+        session = self._get_session()
+        rows = (
+            session.query(
+                Race.round,
+                RaceResult.position,
+                RaceResult.points,
+                RaceResult.status,
+            )
+            .join(RaceResult, RaceResult.race_id == Race.id)
+            .filter(Race.season_year == season_year, RaceResult.driver_ref == driver_ref)
+            .order_by(Race.round)
+            .all()
+        )
+        return [
+            {
+                "round": r.round,
+                "position": r.position,
+                "points": float(r.points or 0.0),
+                "status": r.status,
+            }
+            for r in rows
+        ]
+
     # ── Lap times ────────────────────────────────────────────────────────────
 
     def get_lap_times(
