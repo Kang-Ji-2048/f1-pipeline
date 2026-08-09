@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from src.db.queries import F1Database
-from src.db.schema import Base, LapTime, PitStop, Race, TelemetrySample
+from src.db.schema import Base, LapTime, PitStop, Race, RaceResult, TelemetrySample
 
 
 @pytest.fixture()
@@ -122,4 +122,67 @@ class TestTelemetryDrivers:
         db = F1Database(session=session)
         assert db.get_telemetry_drivers(9001) == [1, 44]
         assert db.get_telemetry_drivers(9999) == []
+        session.close()
+
+
+class TestDriverResults:
+    def test_returns_per_round_results_ordered(self):
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        session = Session(engine)
+        session.add_all(
+            [
+                Race(
+                    id=1,
+                    season_year=2023,
+                    round=1,
+                    name="R1",
+                    circuit_ref="c",
+                    date=date(2023, 3, 5),
+                ),
+                Race(
+                    id=2,
+                    season_year=2023,
+                    round=2,
+                    name="R2",
+                    circuit_ref="c",
+                    date=date(2023, 3, 12),
+                ),
+                RaceResult(
+                    id=1,
+                    race_id=2,
+                    driver_ref="ver",
+                    constructor_ref="rb",
+                    position=3,
+                    points=15.0,
+                    status="Finished",
+                ),
+                RaceResult(
+                    id=2,
+                    race_id=1,
+                    driver_ref="ver",
+                    constructor_ref="rb",
+                    position=1,
+                    points=25.0,
+                    status="Finished",
+                ),
+                RaceResult(
+                    id=3,
+                    race_id=1,
+                    driver_ref="ham",
+                    constructor_ref="mer",
+                    position=2,
+                    points=18.0,
+                    status="Finished",
+                ),
+            ]
+        )
+        session.commit()
+
+        db = F1Database(session=session)
+        assert db.get_driver_results(2023, "ver") == [
+            {"round": 1, "position": 1, "points": 25.0, "status": "Finished"},
+            {"round": 2, "position": 3, "points": 15.0, "status": "Finished"},
+        ]
+        assert db.get_driver_results(2023, "nobody") == []
         session.close()

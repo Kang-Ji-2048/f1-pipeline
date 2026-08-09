@@ -169,6 +169,117 @@ def render_race_strategy(db: F1Database, season: int, round_num: int) -> None:
             )
 
 
+def _sum_points(results: list[dict[str, Any]]) -> float:
+    return sum(r["points"] for r in results)
+
+
+def _count(results: list[dict[str, Any]], max_pos: int) -> int:
+    return sum(1 for r in results if r["position"] is not None and r["position"] <= max_pos)
+
+
+def _avg_finish(results: list[dict[str, Any]]) -> float:
+    finishes = [r["position"] for r in results if r["position"] is not None]
+    return sum(finishes) / len(finishes) if finishes else 0.0
+
+
+def render_head_to_head(
+    db: F1Database,
+    season: int,
+    standings: list[dict[str, Any]],
+    selected_round: int | None,
+) -> None:
+    """Side-by-side comparison of two drivers across the season."""
+    refs = [str(s["driver_ref"]) for s in standings]
+    if len(refs) < 2:
+        st.info("Need at least two drivers in this season to compare.")
+        return
+
+    col_a, col_b = st.columns(2)
+    driver_a = col_a.selectbox("Driver A", refs, index=0)
+    driver_b = col_b.selectbox("Driver B", refs, index=1)
+    if driver_a == driver_b:
+        st.info("Pick two different drivers.")
+        return
+
+    results = {ref: db.get_driver_results(season, ref) for ref in (driver_a, driver_b)}
+    colours = {driver_a: PALETTE[0], driver_b: PALETTE[1]}
+
+    # ── Comparison tiles (delta on A relative to B) ──────────────────────────
+    ra, rb = results[driver_a], results[driver_b]
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Points", f"{_sum_points(ra):.0f}", delta=f"{_sum_points(ra) - _sum_points(rb):+.0f}")
+    m2.metric("Wins", _count(ra, 1), delta=_count(ra, 1) - _count(rb, 1))
+    m3.metric("Podiums", _count(ra, 3), delta=_count(ra, 3) - _count(rb, 3))
+    m4.metric(
+        "Avg finish",
+        f"{_avg_finish(ra):.1f}",
+        delta=f"{_avg_finish(ra) - _avg_finish(rb):+.1f}",
+        delta_color="inverse",  # a lower average finish is better
+    )
+    st.caption(f"Deltas are {driver_a} relative to {driver_b}.")
+
+    # ── Cumulative points progression ────────────────────────────────────────
+    prog: list[dict[str, Any]] = []
+    for ref in (driver_a, driver_b):
+        running = 0.0
+        for row in results[ref]:
+            running += row["points"]
+            prog.append({"round": row["round"], "driver": ref, "cumulative": running})
+    if prog:
+        fig = px.line(
+            pd.DataFrame(prog),
+            x="round",
+            y="cumulative",
+            color="driver",
+            markers=True,
+            color_discrete_map=colours,
+        )
+        fig.update_layout(xaxis_title="Round", yaxis_title="Cumulative points")
+        style_fig(fig, height=320)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Finishing position by round (P1 at top) ──────────────────────────────
+    pos: list[dict[str, Any]] = [
+        {"round": row["round"], "driver": ref, "position": row["position"]}
+        for ref in (driver_a, driver_b)
+        for row in results[ref]
+        if row["position"] is not None
+    ]
+    if pos:
+        fig = px.line(
+            pd.DataFrame(pos),
+            x="round",
+            y="position",
+            color="driver",
+            markers=True,
+            color_discrete_map=colours,
+        )
+        fig.update_layout(xaxis_title="Round", yaxis_title="Finishing position")
+        fig.update_yaxes(autorange="reversed")
+        style_fig(fig, height=320)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Lap-time distribution for the selected race ──────────────────────────
+    if selected_round is not None:
+        rows = db.get_lap_time_distribution(season, selected_round)
+        pair = [r for r in rows if r["driver_ref"] in (driver_a, driver_b)]
+        if pair:
+            df = pd.DataFrame(pair)
+            df["seconds"] = df["time_millis"] / 1000.0
+            fig = px.box(
+                df,
+                x="driver_ref",
+                y="seconds",
+                color="driver_ref",
+                points="outliers",
+                color_discrete_map=colours,
+            )
+            fig.update_layout(xaxis_title=None, yaxis_title="Lap time (s)")
+            style_fig(fig, height=320, show_legend=False)
+            st.caption("Lap-time distribution for the race selected in the sidebar.")
+            st.plotly_chart(fig, use_container_width=True)
+
+
 def render_telemetry(db: F1Database, season: int) -> None:
     """Speed / throttle & brake / gear traces for one driver in an OpenF1 session."""
     sessions = db.get_sessions(season)
@@ -265,12 +376,13 @@ def main() -> None:
             label = st.sidebar.selectbox("Race", list(race_labels))
             selected_round = race_labels[label]
 
-        tab1, tab2, tab3, tab4 = st.tabs(
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(
             [
                 "🏆 Driver performance",
                 "⏱️ Lap-time distributions",
                 "🛞 Race strategy",
                 "📈 Telemetry",
+                "🆚 Head-to-head",
             ]
         )
         with tab1:
@@ -287,6 +399,8 @@ def main() -> None:
                 st.info("No races available for this season.")
         with tab4:
             render_telemetry(db, season)
+        with tab5:
+            render_head_to_head(db, season, standings, selected_round)
 
 
 if __name__ == "__main__":
