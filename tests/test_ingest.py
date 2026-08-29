@@ -13,6 +13,7 @@ from src.models.validators import (
 )
 from src.pipeline.ingest import (
     _upsert_batch,
+    backfill_seasons,
     ingest_live,
     ingest_season,
     ingest_telemetry,
@@ -111,7 +112,10 @@ class TestIngestTelemetry:
         mock_openf1.get_session_drivers.return_value = [1, 44]
         mock_openf1.get_car_data.return_value = []
 
-        with patch("src.pipeline.ingest._upsert_batch", return_value=0):
+        with (
+            patch("src.pipeline.ingest._upsert_batch", return_value=0),
+            patch("src.pipeline.ingest.aggregate_telemetry", return_value=0),
+        ):
             counts = ingest_telemetry(2023, session_keys=[9001])
 
         assert "sessions" in counts
@@ -146,7 +150,10 @@ class TestIngestTelemetry:
         mock_openf1.get_session_drivers.return_value = [1]
         mock_openf1.get_car_data.return_value = []
 
-        with patch("src.pipeline.ingest._upsert_batch", return_value=0):
+        with (
+            patch("src.pipeline.ingest._upsert_batch", return_value=0),
+            patch("src.pipeline.ingest.aggregate_telemetry", return_value=0),
+        ):
             ingest_telemetry(2023, skip_existing=True)
 
         # only the not-yet-ingested session is processed
@@ -172,7 +179,10 @@ class TestIngestLive:
 
         sleep_calls: list[float] = []
 
-        with patch("src.pipeline.ingest._upsert_batch", side_effect=[2, 1]):
+        with (
+            patch("src.pipeline.ingest._upsert_batch", side_effect=[2, 1]),
+            patch("src.pipeline.ingest.aggregate_telemetry", return_value=0),
+        ):
             counts = ingest_live(
                 session_key=9001,
                 interval=0.0,
@@ -211,6 +221,43 @@ class TestIngestLive:
 
         assert counts == {"telemetry_samples": 0, "iterations": 1}
         mock_upsert.assert_not_called()
+
+
+class TestBackfillSeasons:
+    @patch("src.pipeline.ingest.ingest_season")
+    def test_ingests_each_season_in_order(self, mock_ingest):
+        mock_ingest.side_effect = lambda y: {"races": y - 2000}
+
+        results = backfill_seasons([2021, 2022, 2023])
+
+        assert list(results) == [2021, 2022, 2023]
+        assert results[2022] == {"races": 22}
+        assert [c.args[0] for c in mock_ingest.call_args_list] == [2021, 2022, 2023]
+
+    @patch("src.pipeline.ingest.ingest_season")
+    def test_continues_past_a_failing_season(self, mock_ingest):
+        def side_effect(year):
+            if year == 2022:
+                raise RuntimeError("api down")
+            return {"races": 1}
+
+        mock_ingest.side_effect = side_effect
+
+        results = backfill_seasons([2021, 2022, 2023])
+
+        # the bad season is skipped, the others are still ingested
+        assert set(results) == {2021, 2023}
+
+    @patch("src.pipeline.ingest.ingest_season")
+    def test_stop_on_error_propagates(self, mock_ingest):
+        mock_ingest.side_effect = RuntimeError("boom")
+
+        try:
+            backfill_seasons([2021], continue_on_error=False)
+        except RuntimeError as exc:
+            assert "boom" in str(exc)
+        else:
+            raise AssertionError("expected RuntimeError to propagate")
 
 
 class TestWarnZeroCounts:

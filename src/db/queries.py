@@ -19,6 +19,7 @@ from src.db.schema import (
     Season,
     SessionInfo,
     TelemetrySample,
+    TelemetrySummary,
 )
 
 
@@ -472,6 +473,34 @@ class F1Database:
                 "drs": t.drs,
             }
             for t in rows
+        ]
+
+    def get_telemetry_summary(self, session_key: int) -> list[dict[str, Any]]:
+        """Return the precomputed per-driver telemetry summary for a session.
+
+        Reads the ``telemetry_summaries`` roll-up (one row per driver) rather than
+        scanning the raw samples, ordered fastest first by top speed.
+        """
+        session = self._get_session()
+        rows = (
+            session.query(TelemetrySummary)
+            .filter(TelemetrySummary.session_key == session_key)
+            .order_by(TelemetrySummary.max_speed.desc().nullslast())
+            .all()
+        )
+        return [
+            {
+                "driver_number": s.driver_number,
+                "sample_count": s.sample_count,
+                "max_speed": s.max_speed,
+                "avg_speed": s.avg_speed,
+                "max_rpm": s.max_rpm,
+                "max_gear": s.max_gear,
+                "avg_throttle": s.avg_throttle,
+                "full_throttle_fraction": s.full_throttle_fraction,
+                "brake_fraction": s.brake_fraction,
+            }
+            for s in rows
         ]
 
     # ── Dashboard aggregations ─────────────────────────────────────────────────
