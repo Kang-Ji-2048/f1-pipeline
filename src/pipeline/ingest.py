@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 import structlog
+from sqlalchemy import case, func
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -27,6 +28,7 @@ from src.db.schema import (
     Season,
     SessionInfo,
     TelemetrySample,
+    TelemetrySummary,
 )
 
 logger = structlog.get_logger(__name__)
@@ -201,6 +203,29 @@ def ingest_season(season_year: int) -> dict[str, int]:
     return counts
 
 
+def backfill_seasons(
+    years: Iterable[int],
+    continue_on_error: bool = True,
+) -> dict[int, dict[str, int]]:
+    """Ingest several Ergast seasons in order, returning per-season row counts.
+
+    Used to build a multi-season history (e.g. to train the points model on more
+    than a single year). When one season fails and ``continue_on_error`` is True
+    (the default), the error is logged and the backfill moves on rather than
+    losing the seasons already ingested; otherwise the exception propagates.
+    Failed seasons are omitted from the returned mapping.
+    """
+    results: dict[int, dict[str, int]] = {}
+    for year in years:
+        try:
+            results[year] = ingest_season(year)
+        except Exception as exc:  # noqa: BLE001 — logged, and re-raised unless continuing
+            logger.error("backfill_season_failed", season=year, error=str(exc))
+            if not continue_on_error:
+                raise
+    return results
+
+
 def _warn_zero_counts(counts: dict[str, int]) -> list[str]:
     """Log a warning for every table that ingested zero rows and return them.
 
@@ -260,9 +285,66 @@ def ingest_telemetry(
             logger.info("session_telemetry_ingested", session_key=sk, count=session_total)
         counts["telemetry_samples"] = telem_count
 
+        # Roll the freshly-ingested sessions up into dashboard-friendly summaries.
+        counts["telemetry_summaries"] = aggregate_telemetry(session, keys)
+        session.commit()
+
     _warn_zero_counts(counts)
     logger.info("telemetry_ingested", year=year, counts=counts)
     return counts
+
+
+def aggregate_telemetry(session: Session, session_keys: Sequence[int] | None = None) -> int:
+    """Roll raw telemetry samples up into per-(session, driver) summary rows.
+
+    The aggregates are computed in a single SQL ``GROUP BY`` and upserted into
+    ``telemetry_summaries``, so the dashboard reads one row per driver instead of
+    scanning the millions of rows in ``telemetry_samples``. Pass ``session_keys``
+    to refresh only the sessions just ingested; with ``None`` every session is
+    rebuilt. Returns the number of summary rows written.
+    """
+    speed, rpm, gear = TelemetrySample.speed, TelemetrySample.rpm, TelemetrySample.gear
+    throttle, brake = TelemetrySample.throttle, TelemetrySample.brake
+
+    query = session.query(
+        TelemetrySample.session_key,
+        TelemetrySample.driver_number,
+        func.count().label("sample_count"),
+        func.max(speed).label("max_speed"),
+        func.avg(speed).label("avg_speed"),
+        func.max(rpm).label("max_rpm"),
+        func.max(gear).label("max_gear"),
+        func.avg(throttle).label("avg_throttle"),
+        func.avg(case((throttle >= 99, 1.0), else_=0.0)).label("full_throttle_fraction"),
+        func.avg(case((brake > 0, 1.0), else_=0.0)).label("brake_fraction"),
+    ).group_by(TelemetrySample.session_key, TelemetrySample.driver_number)
+    if session_keys:
+        query = query.filter(TelemetrySample.session_key.in_(list(session_keys)))
+
+    def _f(value: Any, ndigits: int) -> float | None:
+        return round(float(value), ndigits) if value is not None else None
+
+    def _i(value: Any) -> int | None:
+        return int(value) if value is not None else None
+
+    rows = [
+        {
+            "session_key": r.session_key,
+            "driver_number": r.driver_number,
+            "sample_count": int(r.sample_count),
+            "max_speed": _i(r.max_speed),
+            "avg_speed": _f(r.avg_speed, 2),
+            "max_rpm": _i(r.max_rpm),
+            "max_gear": _i(r.max_gear),
+            "avg_throttle": _f(r.avg_throttle, 2),
+            "full_throttle_fraction": _f(r.full_throttle_fraction, 4),
+            "brake_fraction": _f(r.brake_fraction, 4),
+        }
+        for r in query.all()
+    ]
+    written = _upsert_batch(session, TelemetrySummary, rows, ["session_key", "driver_number"])
+    logger.info("telemetry_aggregated", summaries=written)
+    return written
 
 
 def ingest_live(
@@ -285,6 +367,7 @@ def ingest_live(
     own_client = client is None
     openf1 = client or OpenF1Client()
     after: str | None = None
+    seen_keys: set[int] = set()
 
     try:
         with get_session() as session:
@@ -300,6 +383,7 @@ def ingest_live(
                         ["session_key", "driver_number", "date"],
                     )
                     after = max(s.date for s in samples).isoformat()
+                    seen_keys.update(s.session_key for s in samples)
                 counts["iterations"] += 1
                 iteration += 1
                 logger.info(
@@ -310,6 +394,9 @@ def ingest_live(
                 )
                 if max_iterations is None or iteration < max_iterations:
                     sleep(interval)
+            # Refresh summaries for the sessions this run actually touched.
+            if seen_keys:
+                aggregate_telemetry(session, sorted(seen_keys))
     finally:
         if own_client:
             openf1.close()

@@ -9,10 +9,16 @@ import click
 import structlog
 
 from src.config import settings
-from src.db.engine import engine
+from src.db.engine import engine, get_session
 from src.db.queries import F1Database
 from src.db.schema import Base
-from src.pipeline.ingest import ingest_live, ingest_season, ingest_telemetry
+from src.pipeline.ingest import (
+    aggregate_telemetry,
+    backfill_seasons,
+    ingest_live,
+    ingest_season,
+    ingest_telemetry,
+)
 
 # Map string log level to Python logging int (e.g. "INFO" -> 20)
 _log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
@@ -90,6 +96,49 @@ def ingest_all(season: int) -> None:
         logger.error("ingest_failed", season=season, error=str(exc))
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
+
+
+@main.command()
+@click.option("--start", "-f", required=True, type=int, help="First season year (inclusive)")
+@click.option("--end", "-t", required=True, type=int, help="Last season year (inclusive)")
+@click.option(
+    "--stop-on-error",
+    is_flag=True,
+    help="Abort on the first failing season instead of skipping it",
+)
+def backfill(start: int, end: int, stop_on_error: bool) -> None:
+    """Ingest a range of Ergast seasons to build a multi-season history."""
+    if end < start:
+        click.echo("Error: --end must be >= --start.", err=True)
+        sys.exit(1)
+
+    years = range(start, end + 1)
+    logger.info("cli_backfill", start=start, end=end)
+    results = backfill_seasons(years, continue_on_error=not stop_on_error)
+
+    totals: dict[str, int] = {}
+    for counts in results.values():
+        for table, n in counts.items():
+            totals[table] = totals.get(table, 0) + n
+
+    ok = sorted(results)
+    failed = [y for y in years if y not in results]
+    click.echo(f"Backfilled {len(ok)}/{len(years)} seasons ({start}–{end}).")
+    if ok:
+        click.echo(f"  seasons ingested: {', '.join(str(y) for y in ok)}")
+    if failed:
+        click.echo(f"  failed (skipped): {', '.join(str(y) for y in failed)}")
+    click.echo("  totals:")
+    for table, n in totals.items():
+        click.echo(f"    {table}: {n} rows")
+
+
+@main.command("aggregate-telemetry")
+def aggregate_telemetry_cmd() -> None:
+    """(Re)build per-driver telemetry summaries from the raw samples."""
+    with get_session() as session:
+        written = aggregate_telemetry(session)
+    click.echo(f"Wrote {written} telemetry summary rows.")
 
 
 @main.command()

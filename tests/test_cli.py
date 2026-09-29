@@ -47,6 +47,54 @@ class TestIngestOpenF1Command:
         assert kwargs["skip_existing"] is True
 
 
+class TestBackfillCommand:
+    def test_backfill_sums_totals_across_seasons(self):
+        runner = CliRunner()
+        with patch("src.pipeline.cli.backfill_seasons") as mock_backfill:
+            mock_backfill.return_value = {
+                2022: {"races": 22, "race_results": 440},
+                2023: {"races": 23, "race_results": 460},
+            }
+            result = runner.invoke(main, ["backfill", "--start", "2022", "--end", "2023"])
+
+        assert result.exit_code == 0, result.output
+        assert "Backfilled 2/2 seasons" in result.output
+        assert "races: 45 rows" in result.output  # 22 + 23
+        _, kwargs = mock_backfill.call_args
+        assert kwargs["continue_on_error"] is True
+
+    def test_backfill_reports_skipped_seasons(self):
+        runner = CliRunner()
+        with patch("src.pipeline.cli.backfill_seasons") as mock_backfill:
+            mock_backfill.return_value = {2022: {"races": 22}}  # 2023 failed
+            result = runner.invoke(main, ["backfill", "--start", "2022", "--end", "2023"])
+
+        assert result.exit_code == 0
+        assert "failed (skipped): 2023" in result.output
+
+    def test_backfill_rejects_reversed_range(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["backfill", "--start", "2023", "--end", "2020"])
+        assert result.exit_code == 1
+        assert "must be >= --start" in result.output
+
+
+class TestAggregateTelemetryCommand:
+    def test_reports_summary_row_count(self):
+        runner = CliRunner()
+        with (
+            patch("src.pipeline.cli.get_session") as mock_get_session,
+            patch("src.pipeline.cli.aggregate_telemetry", return_value=40) as mock_agg,
+        ):
+            mock_get_session.return_value.__enter__.return_value = object()
+            mock_get_session.return_value.__exit__.return_value = False
+            result = runner.invoke(main, ["aggregate-telemetry"])
+
+        assert result.exit_code == 0, result.output
+        assert "Wrote 40 telemetry summary rows" in result.output
+        mock_agg.assert_called_once()
+
+
 class TestExportS3Command:
     def test_errors_when_no_bucket(self):
         runner = CliRunner()

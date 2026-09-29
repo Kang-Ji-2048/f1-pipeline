@@ -47,7 +47,7 @@ Normalised into dimension and fact tables:
 
 - **Dimensions:** `seasons`, `circuits`, `drivers`, `constructors`
 - **Facts:** `races`, `race_results`, `lap_times`, `pit_stops`
-- **Telemetry:** `sessions`, `telemetry_samples`
+- **Telemetry:** `sessions`, `telemetry_samples`, `telemetry_summaries` (per-driver roll-ups)
 
 All fact tables use composite unique constraints for idempotent upserts.
 
@@ -86,7 +86,20 @@ f1-pipeline live --session-key latest --interval 5
 ```
 
 It tracks a moving timestamp cursor, so each poll fetches only newly-arrived
-samples and the idempotent upserts never duplicate.
+samples and the idempotent upserts never duplicate. After each batch or live run,
+the raw samples are rolled up into per-(session, driver) rows in
+`telemetry_summaries`, so the dashboard reads one row per driver instead of
+scanning the millions of raw samples (`f1-pipeline aggregate-telemetry` rebuilds
+them on demand).
+
+## Backfilling history
+
+Ingest a range of seasons in one command to build a larger history (e.g. to train
+the points model on more than a single year):
+
+```bash
+f1-pipeline backfill --start 2010 --end 2024   # skips a failing season and continues
+```
 
 ## Dashboard
 
@@ -175,5 +188,5 @@ pytest -m integration  # tests that require a live database
 
 ## Roadmap
 
-- Persist live telemetry summaries into dedicated dashboard-friendly aggregate tables.
-- Backfill multiple seasons to train the points model on a larger history.
+- Add sprint-race results (currently excluded) to the schema and standings.
+- Feature-engineer weather and tyre-compound signals into the points model.

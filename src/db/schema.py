@@ -215,3 +215,32 @@ class SessionInfo(Base):
     year = Column(Integer, nullable=False)
 
     __table_args__ = (Index("ix_sessions_year", "year"),)
+
+
+class TelemetrySummary(Base):
+    """Per-(session, driver) roll-up of the high-frequency telemetry samples.
+
+    Precomputed at ingest time so the dashboard can read one row per driver
+    instead of scanning the millions of raw rows in ``telemetry_samples``.
+    """
+
+    __tablename__ = "telemetry_summaries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_key = Column(Integer, nullable=False)
+    driver_number = Column(Integer, nullable=False)
+    sample_count = Column(Integer, nullable=False)
+    max_speed = Column(Integer)
+    avg_speed = Column(Float)
+    max_rpm = Column(Integer)
+    max_gear = Column(Integer)
+    avg_throttle = Column(Float)
+    full_throttle_fraction = Column(Float)
+    brake_fraction = Column(Float)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_key", "driver_number", name="uq_telem_summary_session_driver"
+        ),
+        Index("ix_telem_summary_session", "session_key"),
+    )

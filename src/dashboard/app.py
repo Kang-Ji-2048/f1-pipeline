@@ -121,6 +121,12 @@ def load_telemetry(session_key: int, driver_number: int) -> list[dict[str, Any]]
         return db.get_telemetry(session_key, driver_number, limit=5000)
 
 
+@st.cache_data(ttl=_CACHE_TTL)
+def load_telemetry_summary(session_key: int) -> list[dict[str, Any]]:
+    with F1Database() as db:
+        return db.get_telemetry_summary(session_key)
+
+
 @st.cache_resource(ttl=_CACHE_TTL)
 def load_points_model() -> tuple[Any, Any, pd.DataFrame]:
     """Train the race-points model on all ingested results (cached process-wide).
@@ -611,6 +617,31 @@ def render_telemetry(season: int) -> None:
         st.info("No telemetry ingested for this session yet.")
         return
     driver_number = col_d.selectbox("Car number", drivers)
+
+    # ── Session roll-up (read from the precomputed telemetry_summaries table) ──
+    summary = load_telemetry_summary(session_key)
+    if summary:
+        total_samples = sum(s["sample_count"] for s in summary)
+        top = summary[0]  # ordered fastest-first by the query
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Drivers summarised", len(summary))
+        s2.metric("Raw samples rolled up", f"{total_samples:,}")
+        s3.metric("Top speed", f"{top['max_speed']} km/h" if top["max_speed"] else "—")
+
+        with st.expander("Per-driver session summary", expanded=False):
+            table = [
+                {
+                    "Car": s["driver_number"],
+                    "Samples": s["sample_count"],
+                    "Top speed": s["max_speed"],
+                    "Avg speed": s["avg_speed"],
+                    "Max gear": s["max_gear"],
+                    "Full-throttle %": round((s["full_throttle_fraction"] or 0) * 100, 1),
+                    "Braking %": round((s["brake_fraction"] or 0) * 100, 1),
+                }
+                for s in summary
+            ]
+            st.dataframe(pd.DataFrame(table), hide_index=True, width="stretch")
 
     rows = load_telemetry(session_key, driver_number)
     if not rows:
